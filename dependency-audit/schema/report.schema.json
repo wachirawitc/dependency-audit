@@ -1,0 +1,356 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dependency-audit:report:1.0.0",
+  "title": "dependency-audit report",
+  "description": "dependency-report.json, schema 1.0.0 (spec §6). validate_report.py checks this schema plus the cross-references the spec lists.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "report_id", "generated_at", "tool", "target", "scan", "summary", "inventory", "vulnerabilities", "suppressed"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "report_id": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+    "generated_at": { "$ref": "#/$defs/datetime" },
+    "sample": { "type": "boolean", "description": "true only for the fictional sample report" },
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "agent_model"],
+      "properties": {
+        "name": { "const": "dependency-audit" },
+        "version": { "type": "string", "minLength": 1 },
+        "agent_model": { "type": "string", "minLength": 1 }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "path", "vcs"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "minLength": 1 },
+        "vcs": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["type", "commit", "branch", "dirty"],
+          "properties": {
+            "type": { "type": "string" },
+            "commit": { "type": "string" },
+            "branch": { "type": ["string", "null"] },
+            "dirty": { "type": ["boolean", "null"] }
+          }
+        }
+      }
+    },
+    "scan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "started_at", "finished_at", "options", "scope", "coverage", "errors"],
+      "properties": {
+        "mode": { "enum": ["online", "offline"] },
+        "started_at": { "$ref": "#/$defs/datetime" },
+        "finished_at": { "$ref": "#/$defs/datetime" },
+        "options": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["offline", "severity", "no_transitive", "unmaintained_months"],
+          "properties": {
+            "offline": { "type": "boolean" },
+            "severity": { "$ref": "#/$defs/severity" },
+            "no_transitive": { "type": "boolean" },
+            "unmaintained_months": { "type": ["integer", "null"], "minimum": 1 },
+            "fail_on": { "enum": ["critical", "high", "medium", "low", "info", null] },
+            "internal_patterns": { "$ref": "#/$defs/strings" },
+            "mirror_policy": { "type": ["string", "null"] }
+          }
+        },
+        "scope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["files_scanned", "excluded_paths"],
+          "properties": {
+            "files_scanned": { "type": "integer", "minimum": 0 },
+            "excluded_paths": { "$ref": "#/$defs/strings" },
+            "osv_scanner_configs": { "$ref": "#/$defs/strings" }
+          }
+        },
+        "coverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["checks_run", "tools_used", "tools_missing", "ecosystems_unsupported"],
+          "properties": {
+            "checks_run": { "type": "array", "minItems": 1, "items": { "enum": ["inventory", "support", "sca"] } },
+            "tools_used": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["name", "version"],
+                "properties": {
+                  "name": { "type": "string", "minLength": 1 },
+                  "version": { "type": ["string", "null"] }
+                }
+              }
+            },
+            "tools_missing": { "$ref": "#/$defs/strings" },
+            "ecosystems_unsupported": { "$ref": "#/$defs/strings" },
+            "osv_scanned_files": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["file", "packages", "scanner"],
+                "properties": {
+                  "file": { "type": ["string", "null"] },
+                  "packages": { "type": ["integer", "null"], "minimum": 0 },
+                  "scanner": { "type": "string" }
+                }
+              }
+            },
+            "gaps": { "$ref": "#/$defs/strings" }
+          }
+        },
+        "errors": { "$ref": "#/$defs/strings" }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["risk_rating", "counts", "inventory_counts", "support_counts", "out_of_support", "headline", "top_actions"],
+      "properties": {
+        "risk_rating": { "enum": ["critical", "high", "medium", "low", "none"] },
+        "counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["critical", "high", "medium", "low", "info"],
+          "properties": {
+            "critical": { "$ref": "#/$defs/count" },
+            "high": { "$ref": "#/$defs/count" },
+            "medium": { "$ref": "#/$defs/count" },
+            "low": { "$ref": "#/$defs/count" },
+            "info": { "$ref": "#/$defs/count" }
+          }
+        },
+        "inventory_counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["runtimes", "frameworks", "libraries_direct", "libraries_transitive"],
+          "properties": {
+            "runtimes": { "$ref": "#/$defs/count" },
+            "frameworks": { "$ref": "#/$defs/count" },
+            "libraries_direct": { "$ref": "#/$defs/count" },
+            "libraries_transitive": { "$ref": "#/$defs/count" }
+          }
+        },
+        "support_counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["supported", "security-only", "end-of-life", "deprecated", "unmaintained", "unknown"],
+          "properties": {
+            "supported": { "$ref": "#/$defs/count" },
+            "security-only": { "$ref": "#/$defs/count" },
+            "end-of-life": { "$ref": "#/$defs/count" },
+            "deprecated": { "$ref": "#/$defs/count" },
+            "unmaintained": { "$ref": "#/$defs/count" },
+            "unknown": { "$ref": "#/$defs/count" }
+          }
+        },
+        "out_of_support": { "$ref": "#/$defs/count" },
+        "headline": { "type": "string", "minLength": 1 },
+        "top_actions": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "inventory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["languages", "runtimes", "frameworks", "libraries"],
+      "properties": {
+        "languages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "files"],
+            "properties": { "name": { "type": "string" }, "files": { "$ref": "#/$defs/count" } }
+          }
+        },
+        "runtimes": { "type": "array", "items": { "$ref": "#/$defs/runtime" } },
+        "frameworks": { "type": "array", "items": { "$ref": "#/$defs/framework" } },
+        "libraries": { "type": "array", "items": { "$ref": "#/$defs/library" } }
+      }
+    },
+    "vulnerabilities": { "type": "array", "items": { "$ref": "#/$defs/finding" } },
+    "suppressed": { "type": "array", "items": { "$ref": "#/$defs/suppressed" } }
+  },
+  "$defs": {
+    "datetime": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$" },
+    "severity": { "enum": ["critical", "high", "medium", "low", "info"] },
+    "count": { "type": "integer", "minimum": 0 },
+    "strings": { "type": "array", "items": { "type": "string" } },
+    "finding_id": { "type": "string", "pattern": "^F-\\d{3,}$" },
+    "rule": { "enum": ["osv", "scanner-advisory", "support-eol", "support-deprecated", "support-unmaintained", "prompt-injection-attempt"] },
+    "version_confidence": { "enum": ["exact", "range", "unknown"] },
+    "support": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "out_of_support", "eol_date", "newer_major_available", "reason", "source", "checked_at"],
+      "properties": {
+        "status": { "enum": ["supported", "security-only", "end-of-life", "deprecated", "unmaintained", "unknown"] },
+        "out_of_support": { "type": "boolean" },
+        "eol_date": { "type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "newer_major_available": { "type": ["boolean", "null"] },
+        "reason": { "type": "string", "minLength": 1 },
+        "source": { "type": ["string", "null"] },
+        "checked_at": { "$ref": "#/$defs/datetime" }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "version", "version_confidence", "evidence", "support", "vulnerability_ids"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^runtime:[^@\\s]+@\\S+$" },
+        "name": { "type": "string", "minLength": 1 },
+        "version": { "type": ["string", "null"] },
+        "version_confidence": { "$ref": "#/$defs/version_confidence" },
+        "evidence": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "support": { "$ref": "#/$defs/support" },
+        "vulnerability_ids": { "type": "array", "items": { "$ref": "#/$defs/finding_id" } }
+      }
+    },
+    "framework": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "category", "version", "version_confidence", "ecosystem", "package", "evidence", "support"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "category": { "type": "string", "minLength": 1 },
+        "version": { "type": ["string", "null"] },
+        "version_confidence": { "$ref": "#/$defs/version_confidence" },
+        "ecosystem": { "type": ["string", "null"] },
+        "package": { "type": ["string", "null"] },
+        "evidence": { "$ref": "#/$defs/strings" },
+        "support": { "$ref": "#/$defs/support" },
+        "library_id": { "type": ["string", "null"] },
+        "manifest": { "type": "string" }
+      }
+    },
+    "library": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "ecosystem", "version", "version_confidence", "direct", "scope", "license", "manifest", "lockfile", "introduced_by", "support", "vulnerability_ids"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^pkg:[a-z]+/\\S+$" },
+        "name": { "type": "string", "minLength": 1 },
+        "ecosystem": { "type": "string", "minLength": 1 },
+        "version": { "type": ["string", "null"] },
+        "version_confidence": { "$ref": "#/$defs/version_confidence" },
+        "direct": { "type": "boolean" },
+        "scope": { "enum": ["runtime", "dev", "optional", "build"] },
+        "license": { "type": ["string", "null"] },
+        "manifest": { "type": ["string", "null"] },
+        "lockfile": { "type": ["string", "null"] },
+        "introduced_by": { "$ref": "#/$defs/strings" },
+        "support": { "$ref": "#/$defs/support" },
+        "vulnerability_ids": { "type": "array", "items": { "$ref": "#/$defs/finding_id" } },
+        "workspace": { "type": "string" },
+        "private": { "type": "boolean" },
+        "vendored": { "type": "boolean" },
+        "found_by": { "$ref": "#/$defs/strings" }
+      }
+    },
+    "location": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file", "line", "snippet_start_line", "snippet"],
+      "properties": {
+        "file": { "type": "string", "minLength": 1 },
+        "line": { "type": ["integer", "null"], "minimum": 1 },
+        "snippet_start_line": { "type": ["integer", "null"], "minimum": 1 },
+        "snippet": { "type": ["string", "null"] }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "category", "rule", "title", "severity", "severity_rationale", "confidence", "status", "cwe", "cvss", "advisory", "affected_package", "location", "reachability", "description", "remediation", "references", "detected_by"],
+      "properties": {
+        "id": { "$ref": "#/$defs/finding_id" },
+        "category": { "enum": ["dependency", "support", "integrity"] },
+        "rule": { "$ref": "#/$defs/rule" },
+        "title": { "type": "string", "minLength": 1 },
+        "severity": { "$ref": "#/$defs/severity" },
+        "severity_rationale": { "type": "string", "minLength": 1 },
+        "confidence": { "enum": ["high", "medium", "low"] },
+        "status": { "enum": ["verified", "unverified"] },
+        "cwe": { "type": "array", "items": { "type": "string", "pattern": "^CWE-\\d+$" } },
+        "cvss": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["version", "score", "vector"],
+          "properties": {
+            "version": { "type": "string", "minLength": 1 },
+            "score": { "type": ["number", "null"], "minimum": 0, "maximum": 10 },
+            "vector": { "type": "string", "minLength": 1 }
+          }
+        },
+        "advisory": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["ids", "source", "affected_range", "fixed_versions"],
+          "properties": {
+            "ids": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "source": { "type": ["string", "null"] },
+            "affected_range": { "type": ["string", "null"] },
+            "fixed_versions": { "$ref": "#/$defs/strings" }
+          }
+        },
+        "affected_package": { "type": ["string", "null"] },
+        "location": { "$ref": "#/$defs/location" },
+        "reachability": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["status", "evidence"],
+          "properties": {
+            "status": { "enum": ["reachable", "not-reachable", "unknown"] },
+            "evidence": { "type": ["string", "null"] }
+          }
+        },
+        "description": { "type": "string", "minLength": 1 },
+        "remediation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["summary", "effort", "breaking_change_risk"],
+          "properties": {
+            "summary": { "type": "string", "minLength": 1 },
+            "effort": { "enum": ["low", "medium", "high"] },
+            "breaking_change_risk": { "enum": ["low", "medium", "high"] }
+          }
+        },
+        "references": { "type": "array", "items": { "type": "string", "pattern": "^https?://\\S+$" } },
+        "detected_by": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "suppressed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rule", "advisory_id", "affected_package", "location", "reason"],
+      "properties": {
+        "rule": { "$ref": "#/$defs/rule" },
+        "advisory_id": { "type": ["string", "null"] },
+        "affected_package": { "type": ["string", "null"] },
+        "location": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["file", "line"],
+          "properties": {
+            "file": { "type": ["string", "null"] },
+            "line": { "type": ["integer", "null"], "minimum": 1 }
+          }
+        },
+        "reason": { "type": "string", "minLength": 1 },
+        "finding_id": { "$ref": "#/$defs/finding_id" },
+        "title": { "type": "string" }
+      }
+    }
+  }
+}

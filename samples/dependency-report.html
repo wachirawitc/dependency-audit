@@ -1,0 +1,667 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>orderdesk · Dependency audit</title>
+<style>
+/* Self-contained: system fonts, no external requests. Order: header, summary, what was checked,
+   vulnerabilities, dependencies, suppressed, footer. */
+:root {
+  --bg: #f5f6f8; --surface: #ffffff; --sunken: #f0f2f5; --fg: #18212b; --muted: #5d6875; --line: #dde2e7;
+  --accent: #0b5cad;
+  --sev-critical: #a8173a; --sev-high: #b5470b; --sev-medium: #8a6400; --sev-low: #2a63a6; --sev-info: #626c78;
+  --ok: #1f7a4a;
+  --font-ui: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, "Liberation Mono", monospace;
+  --radius: 8px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1419; --surface: #161d24; --sunken: #121820; --fg: #e4e9ee; --muted: #9aa6b2; --line: #28323c; --accent: #73b4ec;
+    --sev-critical: #ff6f8a; --sev-high: #ff9659; --sev-medium: #e6bb4a; --sev-low: #77b1f3; --sev-info: #9ea8b4; --ok: #5fd090;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1419; --surface: #161d24; --sunken: #121820; --fg: #e4e9ee; --muted: #9aa6b2; --line: #28323c; --accent: #73b4ec;
+  --sev-critical: #ff6f8a; --sev-high: #ff9659; --sev-medium: #e6bb4a; --sev-low: #77b1f3; --sev-info: #9ea8b4; --ok: #5fd090;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.55 var(--font-ui);
+  padding: 32px max(16px, env(safe-area-inset-right, 0px)) 56px max(16px, env(safe-area-inset-left, 0px));
+}
+.wrap { max-width: 1040px; margin: 0 auto; display: grid; gap: 40px; }
+h1, h2, h3 { margin: 0; line-height: 1.25; text-wrap: balance; }
+h1 { font-size: 1.85rem; font-weight: 650; letter-spacing: -0.01em; }
+h2 { font-size: 1.25rem; font-weight: 650; }
+h3 { font-size: 0.95rem; font-weight: 650; }
+p { margin: 0; }
+a { color: var(--accent); }
+.mono { font-family: var(--font-mono); font-size: 0.9em; }
+.muted { color: var(--muted); }
+.small { font-size: 0.86rem; }
+.num { font-variant-numeric: tabular-nums; }
+.label { font-size: 0.75rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+section { display: grid; gap: 16px; min-width: 0; }
+.section-head { display: grid; gap: 4px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; min-width: 0; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.banner { border: 1px dashed var(--line); border-radius: var(--radius); padding: 10px 14px; font-size: 0.86rem; color: var(--muted); }
+.banner b { color: var(--fg); }
+.banner-error { border: 1px solid var(--sev-critical); border-left-width: 4px; color: var(--fg); background: color-mix(in srgb, var(--sev-critical) 7%, var(--surface)); }
+.banner-error ul { margin: 6px 0 0; padding-left: 18px; }
+
+/* severity and status colours: always paired with a text label */
+.sev-critical { --c: var(--sev-critical); } .sev-high { --c: var(--sev-high); } .sev-medium { --c: var(--sev-medium); }
+.sev-low { --c: var(--sev-low); } .sev-info { --c: var(--sev-info); } .sev-none { --c: var(--ok); }
+.st-supported { --c: var(--ok); } .st-security-only { --c: var(--sev-medium); } .st-end-of-life { --c: var(--sev-critical); }
+.st-deprecated { --c: var(--sev-high); } .st-unmaintained { --c: var(--sev-high); } .st-unknown { --c: var(--sev-info); }
+.pill { display: inline-flex; align-items: center; justify-content: center; min-width: 76px; font-size: 0.74rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--c); background: color-mix(in srgb, var(--c) 12%, transparent); border: 1px solid color-mix(in srgb, var(--c) 40%, transparent); border-radius: 999px; padding: 2px 10px; white-space: nowrap; }
+.status { display: inline-flex; align-items: center; gap: 7px; font-weight: 600; color: var(--c); white-space: nowrap; }
+.status::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--c); flex: none; }
+
+/* header */
+header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px 24px; flex-wrap: wrap; }
+.head-main { display: grid; gap: 6px; min-width: 0; }
+.meta { display: flex; flex-wrap: wrap; gap: 4px 8px; color: var(--muted); font-size: 0.9rem; }
+.meta > span + span::before { content: "·"; margin-right: 8px; }
+.risk { display: grid; gap: 2px; justify-items: end; text-align: right; }
+.risk .pill { font-size: 0.95rem; padding: 6px 16px; }
+
+/* summary */
+.lead { font-size: 1.15rem; line-height: 1.5; max-width: 70ch; }
+.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.stat { display: grid; gap: 6px; align-content: start; }
+.stat .n { font-size: 2.1rem; font-weight: 700; line-height: 1; }
+.stat .detail { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 0.88rem; color: var(--muted); }
+.stat .detail b { color: var(--c, var(--fg)); font-weight: 600; }
+.stat.attention { border-left: 4px solid var(--c); }
+ol.actions { margin: 0; padding: 0; list-style: none; counter-reset: a; display: grid; gap: 10px; }
+ol.actions li { counter-increment: a; display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; align-items: baseline; }
+ol.actions li::before { content: counter(a); font-weight: 700; color: var(--accent); text-align: center; border: 1.5px solid var(--accent); border-radius: 50%; width: 24px; height: 24px; line-height: 21px; font-size: 0.82rem; }
+.ref { font-family: var(--font-mono); font-size: 0.8rem; white-space: nowrap; }
+details.help > summary { cursor: pointer; color: var(--accent); font-size: 0.9rem; width: fit-content; }
+.help-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px 28px; padding-top: 12px; }
+.help-col { display: grid; gap: 8px; align-content: start; min-width: 0; }
+.help-grid dl { margin: 0; display: grid; gap: 6px; font-size: 0.88rem; }
+.help-grid dt { margin-top: 4px; }
+.help-grid dd { margin: 0; color: var(--muted); }
+
+/* what was checked */
+.checked { display: flex; flex-wrap: wrap; gap: 8px 22px; align-items: center; }
+.check-ok { color: var(--ok); font-weight: 600; }
+.check-ok::before { content: "✓ "; }
+.gap { color: var(--sev-medium); font-weight: 600; }
+.gap::before { content: "! "; }
+details.more > summary { cursor: pointer; color: var(--accent); font-size: 0.88rem; width: fit-content; margin-top: 10px; }
+details.more .more-body { display: grid; gap: 8px; padding-top: 10px; font-size: 0.88rem; }
+
+/* filters */
+.controls { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; }
+.controls input[type="search"], .controls select {
+  font: inherit; font-size: 0.9rem; color: var(--fg); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; min-width: 0; }
+.controls input[type="search"] { flex: 1 1 220px; max-width: 300px; }
+.toggle { font: inherit; font-size: 0.85rem; cursor: pointer; border: 1px solid var(--line); background: var(--surface); color: var(--muted); border-radius: 999px; padding: 4px 12px; }
+.toggle[aria-pressed="true"] { color: var(--c); border-color: var(--c); background: color-mix(in srgb, var(--c) 10%, var(--surface)); font-weight: 600; }
+.toggle:disabled { opacity: 0.45; cursor: default; }
+.count { margin-left: auto; font-size: 0.85rem; color: var(--muted); }
+
+/* findings */
+.findings { display: grid; gap: 10px; }
+details.finding { background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--c); border-radius: var(--radius); }
+details.finding > summary { list-style: none; cursor: pointer; padding: 14px 16px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 4px 14px; align-items: center; }
+details.finding > summary::-webkit-details-marker { display: none; }
+.f-title { font-weight: 600; }
+.f-sub { grid-column: 2; display: flex; flex-wrap: wrap; gap: 2px 14px; font-size: 0.88rem; color: var(--muted); }
+.f-sub .fix-hint { color: var(--fg); }
+.f-side { grid-column: 3; grid-row: 1 / 3; display: flex; align-items: center; gap: 10px; }
+.reach-badge { font-size: 0.8rem; font-weight: 600; white-space: nowrap; }
+.reach-reachable { color: var(--sev-critical); } .reach-not-reachable { color: var(--ok); } .reach-unknown { color: var(--muted); font-weight: 500; }
+.chev { width: 9px; height: 9px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(45deg); transition: transform .15s; }
+details[open] > summary .chev { transform: rotate(225deg); }
+.f-body { border-top: 1px solid var(--line); padding: 18px 16px 20px; display: grid; gap: 18px; }
+.f-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 28px; }
+.block { display: grid; gap: 6px; align-content: start; }
+.block p { max-width: 70ch; }
+.fix { border-left: 3px solid var(--ok); padding-left: 12px; }
+.tech { background: var(--sunken); border-radius: 6px; padding: 12px 14px; }
+.tech dl { margin: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 18px; font-size: 0.86rem; }
+.tech dt { color: var(--muted); }
+.tech dd { margin: 0; overflow-wrap: anywhere; }
+.links { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+pre.snippet { margin: 0; background: var(--sunken); border: 1px solid var(--line); border-radius: 6px; padding: 10px 0; overflow-x: auto; font: 0.84rem/1.55 var(--font-mono); }
+pre.snippet .row { display: block; padding-right: 12px; }
+pre.snippet .hit { background: color-mix(in srgb, var(--sev-high) 16%, transparent); }
+pre.snippet .ln { display: inline-block; width: 3.4em; padding-right: 1em; text-align: right; color: var(--muted); user-select: none; }
+.empty { padding: 20px; text-align: center; color: var(--muted); }
+
+/* dependencies */
+.support-bar { display: flex; height: 12px; border-radius: 6px; overflow: hidden; background: var(--sunken); }
+.support-bar span { background: var(--c); }
+.support-bar span + span { border-left: 2px solid var(--surface); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 20px; font-size: 0.88rem; }
+.legend .zero { opacity: 0.55; }
+.legend b { font-variant-numeric: tabular-nums; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.tech-card { display: grid; gap: 6px; align-content: start; padding: 16px; }
+.tech-card.oos { border-color: color-mix(in srgb, var(--sev-critical) 50%, var(--line)); box-shadow: inset 4px 0 0 var(--sev-critical); }
+.tech-card .top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.tech-card .name { font-weight: 650; font-size: 1.05rem; }
+.tech-card .why { font-size: 0.86rem; color: var(--muted); }
+.tech-card .where { font-size: 0.78rem; color: var(--muted); overflow-wrap: anywhere; }
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+th, td { text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+tbody tr:last-child td { border-bottom: 0; }
+th { font-size: 0.74rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); background: var(--sunken); white-space: nowrap; }
+th button { all: unset; cursor: pointer; }
+th button:focus-visible { outline: 2px solid var(--accent); }
+th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--accent); }
+td .sub { font-size: 0.78rem; color: var(--muted); margin-top: 2px; }
+tr.attn td:first-child { box-shadow: inset 3px 0 0 var(--c); }
+
+details.plain { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+details.plain > summary { cursor: pointer; padding: 12px 16px; font-weight: 600; }
+details.plain .inner { border-top: 1px solid var(--line); }
+details.plain table { border: 0; }
+
+footer { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 0.8rem; color: var(--muted); border-top: 1px solid var(--line); padding-top: 14px; }
+
+.noscript { display: grid; gap: 14px; }
+
+@media (max-width: 760px) {
+  h1 { font-size: 1.5rem; }
+  .stats, .f-cols { grid-template-columns: minmax(0, 1fr); }
+  .risk { justify-items: start; text-align: left; }
+  details.finding > summary { grid-template-columns: minmax(0, 1fr) auto; }
+  details.finding > summary .pill { justify-self: start; }
+  .f-title, .f-sub { grid-column: 1 / -1; }
+  .f-side { grid-column: 2; grid-row: 1; }
+  .count { margin-left: 0; width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) { .chev { transition: none; } }
+@media print {
+  body { background: #fff; padding: 0; }
+  .controls, details.help > summary, .chev { display: none; }
+  .card, details.finding, details.plain { break-inside: avoid; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="banner" id="sample-banner" hidden><b>Sample report.</b> The project and scan are fictional. Advisory IDs and support statuses are real public data written from memory to show the format; a real run takes them from OSV.dev, endoflife.date, the package registries or a scanner.</div>
+
+
+  <header>
+    <div class="head-main">
+      <div class="label">Dependency audit</div>
+      <h1 id="proj-name">…</h1>
+      <div class="meta" id="head-meta"></div>
+    </div>
+    <div class="risk" id="risk"></div>
+  </header>
+
+  <noscript>
+    <div class="noscript">
+      <p class="lead">Production runs on Node.js 20, which is end-of-life; the deprecated request package has an SSRF advisory with no fix; lodash and axios have high-severity advisories.</p>
+      <p><b>Overall risk:</b> high · <b>Vulnerabilities:</b> 4 high, 4 medium · <b>Out of support:</b> 3</p>
+      <div class="card"><h3>What to do first</h3><ol><li>Move the production image from Node.js 20 to a supported LTS release (F-006)</li><li>Replace the deprecated request package in the shipping integration (F-007, F-008)</li><li>Upgrade axios to 1.x; it is reachable from the payments client (F-003, F-005)</li><li>Upgrade lodash to 4.17.21 and express to 4.19.2 or later (F-001, F-002, F-004)</li></ol></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>ID</th><th>Severity</th><th>Finding</th><th>Package</th><th>Fix</th></tr></thead>
+        <tbody><tr><td class="mono">F-001</td><td>High</td><td>Prototype pollution in lodash</td><td class="mono">lodash 4.17.15</td><td>Upgrade to 4.17.19 or later</td></tr><tr><td class="mono">F-003</td><td>High</td><td>Regular expression denial of service (ReDoS) in axios</td><td class="mono">axios 0.21.0</td><td>Upgrade to 0.21.2 or later</td></tr><tr><td class="mono">F-006</td><td>High</td><td>Production runs on Node.js 20, which is end-of-life</td><td class="mono">Node.js 20</td><td>Move to a supported Node.js LTS release in the Dockerfile, .nvmrc, engines and .gitlab-ci.yml, then run the test suite.</td></tr><tr><td class="mono">F-007</td><td>High</td><td>request is deprecated and gets no fixes</td><td class="mono">request 2.88.2</td><td>Replace request with the built-in fetch or with axios 1.x in src/services/shipping.ts.</td></tr><tr><td class="mono">F-002</td><td>Medium</td><td>Command injection in lodash template</td><td class="mono">lodash 4.17.15</td><td>Upgrade to 4.17.21 or later</td></tr><tr><td class="mono">F-004</td><td>Medium</td><td>Open redirect in express res.redirect</td><td class="mono">express 4.17.1</td><td>Upgrade to 4.19.2 or later</td></tr><tr><td class="mono">F-005</td><td>Medium</td><td>Server-side request forgery (SSRF) in axios</td><td class="mono">axios 0.21.0</td><td>Upgrade to 0.21.1 or later</td></tr><tr><td class="mono">F-008</td><td>Medium</td><td>Server-side request forgery (SSRF) in request</td><td class="mono">request 2.88.2</td><td>No fixed version</td></tr></tbody>
+      </table></div>
+      <p class="muted small">Turn on JavaScript for filters, the full dependency list and finding details. All data is in dependency-report.json.</p>
+    </div>
+  </noscript>
+
+  <section aria-labelledby="h-summary" id="summary">
+    <h2 id="h-summary" class="label" style="letter-spacing:0.06em">Summary</h2>
+    <p class="lead" id="headline"></p>
+    <div class="stats" id="stats"></div>
+    <div class="card" style="display:grid;gap:14px">
+      <h3>What to do first</h3>
+      <ol class="actions" id="actions"></ol>
+    </div>
+    <details class="help">
+      <summary>How to read this report</summary>
+      <div class="help-grid" id="help"></div>
+    </details>
+  </section>
+
+  <section aria-labelledby="h-checked">
+    <div class="section-head"><h2 id="h-checked">What was checked</h2><p class="muted small" id="scope-line"></p></div>
+    <div class="card">
+      <div class="checked" id="checked"></div>
+      <details class="more"><summary>Tools and sources</summary><div class="more-body" id="tools"></div></details>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-findings">
+    <div class="section-head"><h2 id="h-findings">Vulnerabilities</h2><p class="muted small">Most severe first. Open a row for what it means, whether your code is affected, and how to fix it.</p></div>
+    <div class="controls">
+      <div class="controls" id="sev-filters" role="group" aria-label="Severity"></div>
+      <select id="f-cat" aria-label="Type"></select>
+      <input type="search" id="f-search" placeholder="Search package, title or ID" aria-label="Search vulnerabilities">
+      <span class="count" id="find-count"></span>
+    </div>
+    <div class="findings" id="findings"></div>
+  </section>
+
+  <section aria-labelledby="h-inventory">
+    <div class="section-head"><h2 id="h-inventory">Dependencies</h2><p class="muted small" id="inv-line"></p></div>
+    <div class="card" style="display:grid;gap:12px">
+      <h3>Support status</h3>
+      <div class="support-bar" id="support-bar" role="img"></div>
+      <div class="legend" id="legend"></div>
+    </div>
+    <div class="cards" id="tech-cards"></div>
+    <div class="controls">
+      <input type="search" id="lib-search" placeholder="Search packages" aria-label="Search packages">
+      <select id="lib-show" aria-label="Which packages">
+        <option value="direct">Direct dependencies</option>
+        <option value="attention">Needs attention</option>
+        <option value="all">All, including transitive</option>
+      </select>
+      <select id="lib-scope" aria-label="Scope"><option value="">Any scope</option></select>
+      <span class="count" id="lib-count"></span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr id="lib-head"></tr></thead>
+        <tbody id="lib-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-suppressed">
+    <details class="plain">
+      <summary id="h-suppressed">Suppressed findings</summary>
+      <div class="inner table-wrap" style="border:0;border-radius:0">
+        <table><thead><tr><th>Finding</th><th>Package</th><th>Location</th><th>Why it was suppressed</th></tr></thead><tbody id="suppressed"></tbody></table>
+      </div>
+    </details>
+  </section>
+
+  <footer id="footer"></footer>
+</div>
+
+<script id="report-data" type="application/json">
+{"schema_version":"1.0.0","report_id":"b3e8a417-5c2d-4f90-8e61-2a7d9c04f1b6","generated_at":"2026-11-10T08:14:32Z","sample":true,"tool":{"name":"dependency-audit","version":"0.1.0","agent_model":"claude-opus-5-5"},"target":{"name":"orderdesk","path":"D:/gitlab/orderdesk","vcs":{"type":"git","commit":"9f3c2a1","branch":"main","dirty":false}},"scan":{"mode":"online","started_at":"2026-11-10T08:12:05Z","finished_at":"2026-11-10T08:14:32Z","options":{"offline":false,"severity":"info","no_transitive":false,"unmaintained_months":24,"fail_on":null},"scope":{"files_scanned":214,"excluded_paths":["node_modules/","dist/","coverage/",".git/"]},"coverage":{"checks_run":["inventory","support","sca"],"tools_used":[{"name":"osv-scanner-mcp","version":"2.2.4"},{"name":"osv.dev querybatch","version":"v1"},{"name":"npm-audit","version":"10.8.2"},{"name":"endoflife.date API","version":"v1"},{"name":"npm registry","version":"metadata"}],"tools_missing":[],"ecosystems_unsupported":[]},"errors":[]},"summary":{"risk_rating":"high","counts":{"critical":0,"high":4,"medium":4,"low":0,"info":0},"inventory_counts":{"runtimes":1,"frameworks":3,"libraries_direct":13,"libraries_transitive":3},"support_counts":{"supported":8,"security-only":2,"end-of-life":2,"deprecated":1,"unmaintained":0,"unknown":4},"out_of_support":3,"headline":"Production runs on Node.js 20, which is end-of-life; the deprecated request package has an SSRF advisory with no fix; lodash and axios have high-severity advisories.","top_actions":["Move the production image from Node.js 20 to a supported LTS release (F-006)","Replace the deprecated request package in the shipping integration (F-007, F-008)","Upgrade axios to 1.x; it is reachable from the payments client (F-003, F-005)","Upgrade lodash to 4.17.21 and express to 4.19.2 or later (F-001, F-002, F-004)"]},"inventory":{"languages":[{"name":"TypeScript","files":186},{"name":"JavaScript","files":9},{"name":"YAML","files":4},{"name":"Dockerfile","files":1}],"runtimes":[{"id":"runtime:nodejs@20","name":"Node.js","version":"20","version_confidence":"range","evidence":["Dockerfile:1",".nvmrc","package.json (engines)"],"support":{"status":"end-of-life","out_of_support":true,"eol_date":"2026-04-30","newer_major_available":true,"reason":"Node.js 20 reached end of life on 2026-04-30 and gets no more security releases.","source":"endoflife.date (nodejs)","checked_at":"2026-11-09T08:13:40Z"},"vulnerability_ids":["F-006"]}],"frameworks":[{"name":"Express","category":"web-backend","version":"4.17.1","version_confidence":"exact","ecosystem":"npm","package":"express","evidence":["package-lock.json","src/server.ts"],"support":{"status":"security-only","out_of_support":false,"eol_date":null,"newer_major_available":true,"reason":"Express 4 is in maintenance and gets security fixes only. Express 5 is the current major.","source":"expressjs.com support policy","checked_at":"2026-11-09T08:13:40Z"}},{"name":"React","category":"ui","version":"18.2.0","version_confidence":"exact","ecosystem":"npm","package":"react","evidence":["package-lock.json","web/src/main.tsx"],"support":{"status":"unknown","out_of_support":false,"eol_date":null,"newer_major_available":true,"reason":"React publishes no support policy for older majors. A newer major (19) is available.","source":null,"checked_at":"2026-11-09T08:13:40Z"}},{"name":"Prisma","category":"orm","version":"5.9.0","version_confidence":"exact","ecosystem":"npm","package":"@prisma/client","evidence":["package-lock.json","prisma/schema.prisma"],"support":{"status":"unknown","out_of_support":false,"eol_date":null,"newer_major_available":true,"reason":"Prisma publishes no end-of-life dates for older majors. Newer majors are available.","source":null,"checked_at":"2026-11-09T08:13:40Z"}}],"libraries":[{"id":"pkg:npm/express@4.17.1","name":"express","ecosystem":"npm","version":"4.17.1","version_confidence":"exact","direct":true,"scope":"runtime","license":"MIT","manifest":"package.json","lockfile":"package-lock.json","introduced_by":[],"vulnerability_ids":["F-004"],"support":{"status":"security-only","out_of_support":false,"eol_date":null,"newer_major_available":true,"reason":"Express 4 is in maintenance and gets security fixes only. Express 5 is the current major.","source":"expressjs.com support policy","checked_at":"2026-11-09T08:13:40Z"}},{"id":"pkg:npm/react@18.2.0","name":"react","ecosystem":"npm","version":"18.2.0","version_confidence":"exact","direct":true,"scope":"runtime","license":"MIT","manifest":"package.json","lockfile":"package-lock.json","introduced_by":[],"vulnerability_ids":[],"support":{"status":"unknown","out_of_support":false,"eol_date":null,"newer_major_available":true,"reason":"React publishes no support policy for older majors. A newer major (19) is available.","source":null,"checked_at":"2026-11-09T08:13:40Z"}},{"id":"pkg:npm/react-dom@18.2.0","name":"react-dom","ecosystem":"npm","version":"18.2.0","version_confidence":"exact","direct":true,"scope":"runtime","license":"MIT","manifest":"package.json","lockfile":"package-lock.json","introduced_by":[],"vulnerability_ids":[],"support":{"status":"unknown","out_of_support":false,"eol_date":null,"newer_major_available":true,"reason":"Follows React, which publishes no support policy for older majors.","source":null,"checked_at":"2026-11-09T08:13:40Z"}},{"id":"pkg:npm/%40prisma/client@5.9.0","name":"@prisma/client","ecosystem":"npm","version":"5.9.0","version_confidence":"exact","direct":true,"scope":"runtime","license":"Apache-2.0","manifest":"package.json","lockfile":"package-lock.json","introduced_by":[],"vulnerability_ids":[],"support":{"status":"unknown","out_of_support":false,"eol_date":null,"newer_major_available":true,"reason":"Prisma publishes no end-of-life dates for older majors. Newer majors are available.","source":null,"checked_at":"2026-11-09T08:13:40Z"}},{"id":"pkg:npm/lodash@4.17.15","name":"lodash","ecosystem":"npm","version":"4.17.15","version_confidence":"exact","direct":true,"scope":"runtime","license":"MIT","manifest":"package.json","lockfile":"package-lock.json","introduced_by":[],"vulnerability_ids":["F-001","F-002"],"support":{"status":"supported","out_of_support":false,"eol_date":null,"newer_major_available":false,"reason":"No end-of-life, deprecation or archive notice found.","source":"npm registry, GitHub","checked_at":"2026-11-09T08:13:40Z"}},{"id":"pkg:npm/axios@0.21.0","name":"axios","ecosystem":"npm","version":"0.21.0","version_confidence":"exact","direct":true,"scope":"runtime","license":"MIT","manifest":"package.json","lockfile":"package-lock.json","introduced_by":[],"vulnerability_ids":["F-003","F-005"],"support":{"status":"security-only","out_of_support":false,"eol_date":null,"newer_major_available":true,"reason":"The 0.x line gets occasional backported security fixes only. 1.x is the current major.","source":"GitHub releases (axios/axios)","checked_at":"2026-11-09T08:13:40Z"}},{"id":"pkg:npm/jsonwebtoken@9.0.2","name":"jsonwebtoken","ecosystem":"npm","version":"9.0.2","version_confidence":"exact","direct":true,"scope":"runtime","license":"MIT","manifest":"package.json","lockfile":"package-lock.json","introduced_by":[],"vulnerability_ids":[],"support":{"status":"supported","out_of_support":false,"eol_date":null,"newer_major_available":false,"reason":"No end-of-life, deprecation or archive notice found.","source":"npm registry, GitHub","checked_at":"2026-11-09T08:13:40Z"}},{"id":"pkg:npm/cors@2.8.5","name":"cors","ecosystem":"npm","version":"2.8.5","version_confidence":"exact","direct":true,"scope":"runtime","license":"MIT","manifest":"package.json","lockfile":"package-lock.json","introduced_by":[],"vulnerability_ids":[],"support":{"status":"supported","out_of_support":false,"eol_date":null,"newer_major_available":false,"reason":"No end-of-life, deprecation or archive notice found.","source":"npm registry, GitHub","checked_at":"2026-11-09T08:13:40Z"}},{"id":"pkg:npm/cookie-parser@1.4.6","name":"cookie-parser","ecosystem":"npm","version":"1.4.6","version_confidence":"exact","direct":true,"scope":"runtime","license":"MIT","manifest":"package.json","lockfile":"package-lock.json","introduced_by":[],"vulnerability_ids":[],"support":{"status":"supported","out_of_support":false,"eol_date":null,"newer_major_available":false,"reason":"No end-of-life, deprecation or archive notice found.","source":"npm registry, GitHub","checked_at":"2026-11-09T08:13:40Z"}},{"id":"pkg:npm/zod@3.22.4","name":"zod","ecosystem":"npm","version":"3.22.4","version_confidence":"exact","direct":true,"scope":"runtime","license":"MIT","manifest":"package.json","lockfile":"package-lock.json","introduced_by":[],"vulnerability_ids":[],"support":{"status":"supported","out_of_support":false,"eol_date":null,"newer_major_available":true,"reason":"No end-of-life, deprecation or archive notice found.","source":"npm registry, GitHub","checked_at":"2026-11-09T08:13:40Z"}},{"id":"pkg:npm/request@2.88.2","name":"request","ecosystem":"npm","version":"2.88.2","version_confidence":"exact","direct":true,"scope":"runtime","license":"Apache-2.0","manifest":"package.json","lockfile":"package-lock.json","introduced_by":[],"vulnerability_ids":["F-007","F-008"],"support":{"status":"deprecated","out_of_support":true,"eol_date":null,"newer_major_available":false,"reason":"Marked deprecated on npm: \"request has been deprecated, see https://github.com/request/request/issues/3142\". No releases since 2.88.2.","source":"npm registry","checked_at":"2026-11-09T08:13:40Z"}},{"id":"pkg:npm/prisma@5.9.0","name":"prisma","ecosystem":"npm","version":"5.9.0","version_confidence":"exact","direct":true,"scope":"dev","license":"Apache-2.0","manifest":"package.json","lockfile":"package-lock.json","introduced_by":[],"vulnerability_ids":[],"support":{"status":"unknown","out_of_support":false,"eol_date":null,"newer_major_available":true,"reason":"Prisma publishes no end-of-life dates for older majors. Newer majors are available.","source":null,"checked_at":"2026-11-09T08:13:40Z"}},{"id":"pkg:npm/typescript@5.3.3","name":"typescript","ecosystem":"npm","version":"5.3.3","version_confidence":"exact","direct":true,"scope":"dev","license":"Apache-2.0","manifest":"package.json","lockfile":"package-lock.json","introduced_by":[],"vulnerability_ids":[],"support":{"status":"end-of-life","out_of_support":true,"eol_date":null,"newer_major_available":null,"reason":"TypeScript only patches the latest release. 5.3 gets no fixes.","source":"endoflife.date (typescript)","checked_at":"2026-11-09T08:13:40Z"}},{"id":"pkg:npm/scheduler@0.23.0","name":"scheduler","ecosystem":"npm","version":"0.23.0","version_confidence":"exact","direct":false,"scope":"runtime","license":"MIT","manifest":"package.json","lockfile":"package-lock.json","introduced_by":["react-dom@18.2.0"],"vulnerability_ids":[],"support":{"status":"supported","out_of_support":false,"eol_date":null,"newer_major_available":null,"reason":"No end-of-life, deprecation or archive notice found.","source":"npm registry, GitHub","checked_at":"2026-11-09T08:13:40Z"}},{"id":"pkg:npm/loose-envify@1.4.0","name":"loose-envify","ecosystem":"npm","version":"1.4.0","version_confidence":"exact","direct":false,"scope":"runtime","license":"MIT","manifest":"package.json","lockfile":"package-lock.json","introduced_by":["react@18.2.0"],"vulnerability_ids":[],"support":{"status":"supported","out_of_support":false,"eol_date":null,"newer_major_available":null,"reason":"No end-of-life, deprecation or archive notice found.","source":"npm registry, GitHub","checked_at":"2026-11-09T08:13:40Z"}},{"id":"pkg:npm/js-tokens@4.0.0","name":"js-tokens","ecosystem":"npm","version":"4.0.0","version_confidence":"exact","direct":false,"scope":"runtime","license":"MIT","manifest":"package.json","lockfile":"package-lock.json","introduced_by":["react@18.2.0","loose-envify@1.4.0"],"vulnerability_ids":[],"support":{"status":"supported","out_of_support":false,"eol_date":null,"newer_major_available":null,"reason":"No end-of-life, deprecation or archive notice found.","source":"npm registry, GitHub","checked_at":"2026-11-09T08:13:40Z"}}]},"vulnerabilities":[{"id":"F-001","category":"dependency","rule":"osv","title":"Prototype pollution in lodash","severity":"high","severity_rationale":"CVSS 7.4. lodash is in the runtime bundle. Reachability is unknown, so the severity stays at the CVSS level.","confidence":"high","status":"verified","cwe":["CWE-1321"],"cvss":{"version":"3.1","score":7.4,"vector":"CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:H/A:H"},"advisory":{"ids":["GHSA-p6mc-m468-83gw","CVE-2020-8203"],"source":"osv.dev","affected_range":"\u003c4.17.19","fixed_versions":["4.17.19"]},"affected_package":"pkg:npm/lodash@4.17.15","location":{"file":"package-lock.json","line":null,"snippet_start_line":null,"snippet":null},"reachability":{"status":"unknown","evidence":"zipObjectDeep is not called directly, but lodash is imported in 23 files, so indirect use could not be ruled out."},"description":"lodash versions before 4.17.19 let crafted input add properties to Object.prototype through zipObjectDeep, which can change application logic or cause denial of service.","remediation":{"summary":"Upgrade lodash to 4.17.21, which also fixes F-002.","effort":"low","breaking_change_risk":"low"},"references":["https://osv.dev/vulnerability/GHSA-p6mc-m468-83gw"],"detected_by":["osv-scanner-mcp","osv.dev querybatch","npm-audit"]},{"id":"F-002","category":"dependency","rule":"osv","title":"Command injection in lodash template","severity":"medium","severity_rationale":"CVSS 7.2 (High), lowered to Medium: _.template is not called anywhere in the code, and the attack needs high privileges.","confidence":"high","status":"verified","cwe":["CWE-94"],"cvss":{"version":"3.1","score":7.2,"vector":"CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:U/C:H/I:H/A:H"},"advisory":{"ids":["GHSA-35jh-r3h4-6jhm","CVE-2021-23337"],"source":"osv.dev","affected_range":"\u003c4.17.21","fixed_versions":["4.17.21"]},"affected_package":"pkg:npm/lodash@4.17.15","location":{"file":"package-lock.json","line":null,"snippet_start_line":null,"snippet":null},"reachability":{"status":"not-reachable","evidence":"No calls to _.template or template() from lodash were found in src/ or web/src/."},"description":"The template function in lodash before 4.17.21 can run injected code when an attacker controls the template options.","remediation":{"summary":"Upgrade lodash to 4.17.21.","effort":"low","breaking_change_risk":"low"},"references":["https://osv.dev/vulnerability/GHSA-35jh-r3h4-6jhm"],"detected_by":["osv-scanner-mcp","osv.dev querybatch","npm-audit"]},{"id":"F-003","category":"dependency","rule":"osv","title":"Regular expression denial of service (ReDoS) in axios","severity":"high","severity_rationale":"CVSS 7.5. axios runs on the server and handles responses from third-party payment APIs.","confidence":"high","status":"verified","cwe":["CWE-1333"],"cvss":{"version":"3.1","score":7.5,"vector":"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"},"advisory":{"ids":["GHSA-cph5-m8f7-6c5x","CVE-2021-3749"],"source":"osv.dev","affected_range":"\u003c0.21.2","fixed_versions":["0.21.2"]},"affected_package":"pkg:npm/axios@0.21.0","location":{"file":"package-lock.json","line":null,"snippet_start_line":null,"snippet":null},"reachability":{"status":"reachable","evidence":"src/services/payments.ts:31 calls axios.post with a response handled by axios's internal trim()."},"description":"The trim function in axios before 0.21.2 uses a regular expression that can take a very long time on crafted input, blocking the Node.js event loop.","remediation":{"summary":"Upgrade axios to 0.21.2 or later. Moving to 1.x also fixes F-005 and later advisories.","effort":"low","breaking_change_risk":"medium"},"references":["https://osv.dev/vulnerability/GHSA-cph5-m8f7-6c5x"],"detected_by":["osv-scanner-mcp","osv.dev querybatch","npm-audit"]},{"id":"F-004","category":"dependency","rule":"osv","title":"Open redirect in express res.redirect","severity":"medium","severity_rationale":"CVSS 6.1. The login flow passes a user-controlled next parameter to res.redirect.","confidence":"high","status":"verified","cwe":["CWE-601"],"cvss":{"version":"3.1","score":6.1,"vector":"CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N"},"advisory":{"ids":["GHSA-rv95-896h-c2vc","CVE-2024-29041"],"source":"osv.dev","affected_range":"\u003c4.19.2","fixed_versions":["4.19.2"]},"affected_package":"pkg:npm/express@4.17.1","location":{"file":"package-lock.json","line":null,"snippet_start_line":null,"snippet":null},"reachability":{"status":"reachable","evidence":"src/routes/auth.ts:77 passes req.query.next to res.redirect after login."},"description":"Express before 4.19.2 can be tricked into redirecting to an attacker's site when given a malformed URL, which helps phishing attacks that start from your login page.","remediation":{"summary":"Upgrade express to 4.19.2 or later, and only allow relative paths in next.","effort":"low","breaking_change_risk":"low"},"references":["https://osv.dev/vulnerability/GHSA-rv95-896h-c2vc"],"detected_by":["osv-scanner-mcp","osv.dev querybatch"]},{"id":"F-005","category":"dependency","rule":"osv","title":"Server-side request forgery (SSRF) in axios","severity":"medium","severity_rationale":"CVSS 5.9. Only affects requests made through a proxy, and the payment client uses HTTPS_PROXY in production.","confidence":"medium","status":"verified","cwe":["CWE-918"],"cvss":{"version":"3.1","score":5.9,"vector":"CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N"},"advisory":{"ids":["GHSA-4w2v-q235-vp99","CVE-2020-28168"],"source":"osv.dev","affected_range":"\u003c0.21.1","fixed_versions":["0.21.1"]},"affected_package":"pkg:npm/axios@0.21.0","location":{"file":"package-lock.json","line":null,"snippet_start_line":null,"snippet":null},"reachability":{"status":"unknown","evidence":"HTTPS_PROXY is set in deploy/prod.env. It is unclear whether any upstream returns redirects."},"description":"axios before 0.21.1 follows a redirect without going through the configured proxy, so a malicious upstream can make the server reach internal addresses.","remediation":{"summary":"Upgrade axios (see F-003).","effort":"low","breaking_change_risk":"medium"},"references":["https://osv.dev/vulnerability/GHSA-4w2v-q235-vp99"],"detected_by":["osv-scanner-mcp","osv.dev querybatch","npm-audit"]},{"id":"F-006","category":"support","rule":"support-eol","title":"Production runs on Node.js 20, which is end-of-life","severity":"high","severity_rationale":"The runtime of the production server stopped getting security releases on 2026-04-30. Any new Node.js vulnerability will stay unpatched.","confidence":"high","status":"verified","cwe":["CWE-1104"],"cvss":null,"advisory":null,"affected_package":"runtime:nodejs@20","location":{"file":"Dockerfile","line":1,"snippet_start_line":null,"snippet":null},"reachability":null,"description":"The Docker image, .nvmrc and package.json engines all pin Node.js 20. Node.js 20 reached end of life on 2026-04-30.","remediation":{"summary":"Move to a supported Node.js LTS release in the Dockerfile, .nvmrc, engines and .gitlab-ci.yml, then run the test suite.","effort":"medium","breaking_change_risk":"medium"},"references":["https://endoflife.date/nodejs","https://nodejs.org/en/about/previous-releases"],"detected_by":["endoflife.date API"]},{"id":"F-007","category":"support","rule":"support-deprecated","title":"request is deprecated and gets no fixes","severity":"high","severity_rationale":"Deprecated runtime dependency: Medium under Step 3, raised one level to High because it also has an advisory with no fixed version (F-008).","confidence":"high","status":"verified","cwe":["CWE-1104"],"cvss":null,"advisory":null,"affected_package":"pkg:npm/request@2.88.2","location":{"file":"package.json","line":24,"snippet_start_line":null,"snippet":null},"reachability":null,"description":"The request package was deprecated by its maintainers in 2020. It is still imported in src/services/shipping.ts (6 call sites).","remediation":{"summary":"Replace request with the built-in fetch or with axios 1.x in src/services/shipping.ts.","effort":"medium","breaking_change_risk":"medium"},"references":["https://github.com/request/request/issues/3142"],"detected_by":["npm registry"]},{"id":"F-008","category":"dependency","rule":"osv","title":"Server-side request forgery (SSRF) in request","severity":"medium","severity_rationale":"CVSS 6.1. There is no fixed version, because the package is deprecated.","confidence":"medium","status":"verified","cwe":["CWE-918"],"cvss":{"version":"3.1","score":6.1,"vector":"CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N"},"advisory":{"ids":["GHSA-p8p7-x288-28g6","CVE-2023-28155"],"source":"osv.dev","affected_range":"\u003c=2.88.2","fixed_versions":[]},"affected_package":"pkg:npm/request@2.88.2","location":{"file":"package-lock.json","line":null,"snippet_start_line":null,"snippet":null},"reachability":{"status":"unknown","evidence":"src/services/shipping.ts follows redirects from carrier APIs (followRedirect defaults to true). Whether a carrier can return a cross-protocol redirect was not checked."},"description":"request can follow a redirect that switches between HTTP and HTTPS, which can bypass SSRF protections that check only the first URL.","remediation":{"summary":"No patched version exists. Replace request (see F-007).","effort":"medium","breaking_change_risk":"medium"},"references":["https://osv.dev/vulnerability/GHSA-p8p7-x288-28g6"],"detected_by":["osv-scanner-mcp","osv.dev querybatch","npm-audit"]}],"suppressed":[]}
+</script>
+<script>
+(function () {
+  "use strict";
+  var R = JSON.parse(document.getElementById("report-data").textContent);
+  var SEV = ["critical", "high", "medium", "low", "info"];
+  var SEV_RANK = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
+  var CONF_RANK = { high: 0, medium: 1, low: 2 };
+  var CAT_LABEL = { dependency: "Vulnerable package", support: "Out of support", integrity: "Report integrity" };
+  var CHECK_LABEL = { inventory: "Dependency inventory", support: "Support status", sca: "Known vulnerabilities" };
+  var STATUS = ["end-of-life", "deprecated", "unmaintained", "security-only", "unknown", "supported"];
+  var STATUS_LABEL = { "supported": "Supported", "security-only": "Security fixes only", "end-of-life": "End of life", "deprecated": "Deprecated", "unmaintained": "Unmaintained", "unknown": "Unknown" };
+  var STATUS_HELP = {
+    "end-of-life": "The maintainers have stopped releasing fixes for this version, including security fixes.",
+    "deprecated": "The package registry marks this package or version as deprecated.",
+    "unmaintained": "The project is archived or abandoned and has had no release for a long time.",
+    "security-only": "Still gets security fixes, but nothing else. Plan an upgrade.",
+    "unknown": "No source said either way, for example because the project publishes no support policy.",
+    "supported": "No end-of-life, deprecation or archive notice was found."
+  };
+  var SEV_HELP = {
+    critical: "Exploitable with serious impact. Fix immediately.",
+    high: "Likely exploitable or a runtime that no longer gets fixes. Fix soon.",
+    medium: "Exploitable only in some conditions. Schedule a fix.",
+    low: "Limited impact. Fix when convenient.",
+    info: "Worth knowing; no direct risk."
+  };
+  var REACH = {
+    "reachable": ["Used by your code", "Your code calls the affected part of the package."],
+    "not-reachable": ["Not called by your code", "The affected function wasn't found in your code. Upgrade anyway: this can change."],
+    "unknown": ["Use not confirmed", "It couldn't be determined whether your code uses the affected part."]
+  };
+
+  // DOM helper: strings become text nodes, so repository content is never parsed as HTML.
+  function h(tag, attrs) {
+    var el = document.createElement(tag);
+    if (attrs) for (var k in attrs) {
+      if (attrs[k] == null || attrs[k] === false) continue;
+      if (k === "class") el.className = attrs[k];
+      else if (k === "text") el.textContent = attrs[k];
+      else el.setAttribute(k, attrs[k]);
+    }
+    for (var i = 2; i < arguments.length; i++) {
+      var c = arguments[i];
+      if (c == null || c === false) continue;
+      if (Array.isArray(c)) c.forEach(function (x) { if (x != null && x !== false) el.append(x); });
+      else el.append(c);
+    }
+    return el;
+  }
+  function $(id) { return document.getElementById(id); }
+  function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
+  function plural(n, one, many) { return n + " " + (n === 1 ? one : (many || one + "s")); }
+  function fmtDate(iso) {
+    var d = new Date(iso);
+    if (isNaN(d)) return iso;
+    var m = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][d.getUTCMonth()];
+    return d.getUTCDate() + " " + m + " " + d.getUTCFullYear() + ", " + d.toISOString().slice(11, 16) + " UTC";
+  }
+  function pill(sev, text) { return h("span", { class: "pill sev-" + sev, text: text || sev }); }
+  function statusEl(s) {
+    var st = (s && s.status) || "unknown";
+    return h("span", { class: "status st-" + st, text: STATUS_LABEL[st] + (s && s.eol_date ? " since " + s.eol_date : "") });
+  }
+  function safeUrl(u) { return /^https?:\/\//i.test(u) ? u : null; }
+  function withRefs(text) {
+    // Turn "(F-001)" style references into links that open the finding.
+    var out = [];
+    String(text).split(/(F-\d{3,})/).forEach(function (part) {
+      out.push(/^F-\d{3,}$/.test(part) ? h("a", { href: "#" + part, class: "ref", "data-open": part, text: part }) : part);
+    });
+    return out;
+  }
+
+  var allPkgs = R.inventory.runtimes.concat(R.inventory.libraries);
+  var byId = {}; allPkgs.forEach(function (p) { byId[p.id] = p; });
+
+  // Header
+  if (R.sample) $("sample-banner").hidden = false;
+  document.title = (R.target.name || "Project") + " · Dependency audit";
+  $("proj-name").textContent = R.target.name || R.target.path;
+  var vcs = R.target.vcs;
+  [vcs ? h("span", null, "Commit ", h("span", { class: "mono", text: vcs.commit }), vcs.branch ? " on " + vcs.branch : "", vcs.dirty ? " (with uncommitted changes)" : "") : null,
+   h("span", { text: "Scanned " + fmtDate(R.generated_at) }),
+   h("span", { text: R.scan.mode === "offline" ? "Offline: vulnerabilities not verified" : "Online" })
+  ].forEach(function (x) { if (x) $("head-meta").append(x); });
+  var risk = R.summary.risk_rating;
+  $("risk").append(h("span", { class: "label", text: "Overall risk" }), pill(risk, risk === "none" ? "No risk found" : risk));
+
+  // Summary
+  $("headline").textContent = R.summary.headline;
+  var counts = R.summary.counts, total = 0;
+  SEV.forEach(function (s) { total += counts[s] || 0; });
+  var worst = SEV.filter(function (s) { return counts[s]; })[0];
+  var sevDetail = SEV.filter(function (s) { return counts[s]; }).map(function (s) { return h("span", { class: "sev-" + s }, h("b", { text: counts[s] + " " + s })); });
+  var oos = allPkgs.filter(function (p) { return p.support && p.support.out_of_support; });
+  function oosNames(list) {
+    var seen = {}, names = [];
+    list.forEach(function (p) { var n = (p.name + " " + (p.version || "")).trim(); if (!seen[n]) { seen[n] = 1; names.push(n); } });
+    return names.slice(0, 5).join(", ") + (names.length > 5 ? " and " + (names.length - 5) + " more" : "");
+  }
+  var ic = R.summary.inventory_counts;
+  var stats = [
+    { n: total, label: "Vulnerabilities", cls: worst ? "attention sev-" + worst : "", detail: sevDetail.length ? sevDetail : [h("span", { text: "None found by the checks below" })] },
+    { n: R.summary.out_of_support, label: "Out of support", cls: R.summary.out_of_support ? "attention st-end-of-life" : "",
+      detail: oos.length ? [h("span", { text: oosNames(oos) })] : [h("span", { text: "Everything checked is supported or unknown" })] },
+    { n: ic.libraries_direct + ic.libraries_transitive + ic.runtimes, label: "Packages and runtimes checked", cls: "",
+      detail: [h("span", { text: ic.libraries_direct + " direct · " + ic.libraries_transitive + " transitive · " + plural(ic.runtimes, "runtime") })] }
+  ];
+  stats.forEach(function (s) {
+    $("stats").append(h("div", { class: "card stat " + s.cls }, h("span", { class: "label", text: s.label }), h("span", { class: "n num", text: String(s.n) }), h("div", { class: "detail" }, s.detail)));
+  });
+  R.summary.top_actions.forEach(function (a) { $("actions").append(h("li", null, h("span", null, withRefs(a)))); });
+  if (!R.summary.top_actions.length) $("actions").append(h("li", null, h("span", { class: "muted", text: "Nothing needs action." })));
+
+  function dl(title, rows) {
+    // Flatten the [dt, dd] pairs: h() only unwraps one level of arrays.
+    var items = [];
+    rows.forEach(function (r) { items.push(h("dt", null, r[0]), h("dd", { text: r[1] })); });
+    return h("div", { class: "help-col" }, h("h3", { text: title }), h("dl", null, items));
+  }
+  $("help").append(
+    dl("Severity", SEV.map(function (s) { return [pill(s), SEV_HELP[s]]; })),
+    dl("Support status", STATUS.map(function (s) { return [statusEl({ status: s }), STATUS_HELP[s]]; })),
+    dl("Is your code affected?", Object.keys(REACH).map(function (k) { return [h("span", { class: "reach-badge reach-" + k, text: REACH[k][0] }), REACH[k][1]]; })));
+
+  // What was checked
+  var cov = R.scan.coverage;
+  var skipped = R.scan.scope.excluded_paths;
+  $("scope-line").textContent = R.scan.scope.files_scanned + " files in scope · skipped " + (skipped.length ? skipped.join(", ") : "nothing");
+  cov.checks_run.forEach(function (c) { $("checked").append(h("span", { class: "check-ok", text: CHECK_LABEL[c] || c })); });
+  var gaps = [];
+  if (R.scan.mode === "offline") gaps.push("Offline: vulnerabilities and support status not verified");
+  (cov.gaps || []).forEach(function (g) { if (!(R.scan.mode === "offline" && /^Offline/.test(g))) gaps.push(g); });
+  cov.tools_missing.forEach(function (t) { gaps.push(t + " not available"); });
+  cov.ecosystems_unsupported.forEach(function (e) { gaps.push(e + " found but not analysed"); });
+  R.scan.errors.forEach(function (e) { gaps.push(typeof e === "string" ? e : JSON.stringify(e)); });
+  if (gaps.length) gaps.forEach(function (g) { $("checked").append(h("span", { class: "gap", text: g })); });
+  else $("checked").append(h("span", { class: "muted", text: "No gaps: every planned check ran." }));
+  $("tools").append(h("div", null, h("span", { class: "muted", text: "Tools and data sources: " }), cov.tools_used.map(function (t) { return t.name + (t.version ? " " + t.version : ""); }).join(" · ") || "none"));
+  if ((cov.osv_scanned_files || []).length) $("tools").append(h("div", null, h("span", { class: "muted", text: "Files the osv-scanner scan read: " }),
+    cov.osv_scanned_files.map(function (f) { return f.file + (f.packages != null ? " (" + plural(f.packages, "package") + ")" : ""); }).join(", ")));
+  var opt = R.scan.options || {}, optText = [];
+  if (opt.severity && opt.severity !== "info") optText.push("findings below " + opt.severity + " left out");
+  if (opt.no_transitive) optText.push("direct dependencies only");
+  if (opt.unmaintained_months) optText.push("unmaintained after " + opt.unmaintained_months + " months without a release");
+  if (opt.fail_on) optText.push("CI fails on " + opt.fail_on + " or above");
+  if ((opt.internal_patterns || []).length) optText.push("internal packages: " + opt.internal_patterns.join(", "));
+  if (optText.length) $("tools").append(h("div", null, h("span", { class: "muted", text: "Options: " }), optText.join(" · ")));
+  if ((R.scan.scope.osv_scanner_configs || []).length) $("tools").append(h("div", null, h("span", { class: "muted", text: "osv-scanner.toml files in the repository (read as data, not obeyed): " }),
+    h("span", { class: "mono", text: R.scan.scope.osv_scanner_configs.join(", ") })));
+  $("tools").append(h("div", null, h("span", { class: "muted", text: "Project path: " }), h("span", { class: "mono", text: R.target.path })));
+
+  // Vulnerabilities
+  var sevOn = {}; SEV.forEach(function (s) { sevOn[s] = true; });
+  SEV.forEach(function (s) {
+    var n = counts[s] || 0;
+    var b = h("button", { type: "button", class: "toggle sev-" + s, "aria-pressed": n ? "true" : "false", disabled: n ? null : "disabled", text: cap(s) + " " + n });
+    b.addEventListener("click", function () { sevOn[s] = !sevOn[s]; b.setAttribute("aria-pressed", String(sevOn[s])); renderFindings(); });
+    $("sev-filters").append(b);
+  });
+  $("f-cat").append(h("option", { value: "", text: "All types" }));
+  Object.keys(CAT_LABEL).forEach(function (c) {
+    if (R.vulnerabilities.some(function (f) { return f.category === c; })) $("f-cat").append(h("option", { value: c, text: CAT_LABEL[c] }));
+  });
+
+  function fixHint(f, pkg) {
+    if (f.advisory && f.status === "unverified") return null;
+    if (f.advisory) return f.advisory.fixed_versions.length ? "Fix: upgrade to " + f.advisory.fixed_versions[0] + " or later"
+      : (f.rule === "scanner-advisory" ? "Fixed version not given" : "No fixed version");
+    if (f.category === "support" && pkg && pkg.support) return STATUS_LABEL[pkg.support.status] + (pkg.support.eol_date ? " since " + pkg.support.eol_date : "");
+    return null;
+  }
+  function snippet(text, line, start) {
+    var pre = h("pre", { class: "snippet" });
+    text.split("\n").forEach(function (t, i) {
+      var num = start ? start + i : null;
+      pre.append(h("span", { class: "row" + (num && num === line ? " hit" : "") }, h("span", { class: "ln", text: num ? String(num) : "" }), t));
+    });
+    return pre;
+  }
+  function block(title) { return h("div", { class: "block" }, h("h3", { text: title }), Array.prototype.slice.call(arguments, 1)); }
+
+  function findingEl(f) {
+    var pkg = f.affected_package ? byId[f.affected_package] : null;
+    var loc = f.location && f.location.file ? f.location.file + (f.location.line ? ":" + f.location.line : "") : "";
+    var reach = f.reachability ? REACH[f.reachability.status] : null;
+    var hint = fixHint(f, pkg);
+    var summary = h("summary", null,
+      pill(f.severity),
+      h("span", { class: "f-title", text: f.title }),
+      h("span", { class: "f-side" }, reach ? h("span", { class: "reach-badge reach-" + f.reachability.status, text: reach[0] }) : null, h("span", { class: "chev", "aria-hidden": "true" })),
+      h("span", { class: "f-sub" },
+        h("span", { class: "mono", text: pkg ? pkg.name + " " + (pkg.version || "") : loc }),
+        hint ? h("span", { class: "fix-hint", text: hint }) : null,
+        f.status === "unverified" ? h("span", { text: "Not verified (offline)" }) : null));
+
+    var tech = [];
+    function t(k, v) { if (v != null && v !== "") tech.push(h("dt", { text: k }), h("dd", null, v)); }
+    t("Finding", h("span", { class: "mono", text: f.id }));
+    t("Type", CAT_LABEL[f.category] || f.category);
+    t("Rule", h("span", { class: "mono", text: f.rule }));
+    if (f.advisory) {
+      t("Advisory", f.advisory.ids.length ? h("span", { class: "links" }, f.advisory.ids.map(function (id) {
+        return f.advisory.source === "osv.dev" && /^[A-Z][A-Z0-9]*-[A-Za-z0-9][A-Za-z0-9\-_:.]*$/.test(id) ? h("a", { href: "https://osv.dev/vulnerability/" + encodeURIComponent(id), target: "_blank", rel: "noopener", class: "mono", text: id }) : h("span", { class: "mono", text: id });
+      })) : "None: not verified, so no advisory ID is given");
+      t("Advisory source", f.advisory.source);
+      if (f.advisory.affected_range) t("Affected versions", h("span", { class: "mono", text: f.advisory.affected_range }));
+      if (f.status !== "unverified") t("Fixed in", h("span", { class: "mono", text: f.advisory.fixed_versions.join(", ") || (f.rule === "scanner-advisory" ? "Not given by the scanner" : "No fix released") }));
+    }
+    if (f.cvss) t("CVSS " + f.cvss.version, h("span", null, f.cvss.score != null ? h("b", { class: "num", text: Number(f.cvss.score).toFixed(1) }) : null, f.cvss.score != null ? " " : null, h("span", { class: "mono muted", style: "font-size:0.8rem", text: f.cvss.vector })));
+    if (pkg) t("Installed", (pkg.scope ? cap(pkg.scope) + " dependency, " + (pkg.direct ? "direct" : "transitive") : "Runtime") + " · support: " + STATUS_LABEL[(pkg.support && pkg.support.status) || "unknown"]);
+    t("Evidence", loc ? h("span", { class: "mono", text: loc }) : null);
+    t("Weakness", f.cwe && f.cwe.length ? h("span", { class: "mono", text: f.cwe.join(", ") }) : null);
+    t("Confidence", cap(f.confidence) + (f.status === "unverified" ? ", not verified" : ""));
+    t("Found by", f.detected_by.join(", "));
+    var refs = (f.references || []).map(safeUrl).filter(Boolean);
+    t("References", refs.length ? h("span", { class: "links" }, refs.map(function (u) { return h("a", { href: u, target: "_blank", rel: "noopener", text: u.replace(/^https?:\/\//, "") }); })) : null);
+
+    var body = h("div", { class: "f-body" },
+      h("div", { class: "f-cols" },
+        block("What's wrong", h("p", { text: f.description })),
+        block("Is your code affected?",
+          reach ? h("p", null, h("b", { class: "reach-badge reach-" + f.reachability.status, text: reach[0] + ". " }), f.reachability.evidence || reach[1])
+                : h("p", { class: "muted", text: f.category === "support" ? "This is about the package as a whole, not one function." : "Not assessed." })),
+        h("div", { class: "block fix" }, h("h3", { text: "How to fix" }), h("p", null, withRefs(f.remediation.summary)),
+          h("p", { class: "muted small", text: "Effort: " + f.remediation.effort + " · Risk of breaking changes: " + f.remediation.breaking_change_risk })),
+        block("Why it's " + f.severity, h("p", null, withRefs(f.severity_rationale)))),
+      f.location && f.location.snippet ? snippet(f.location.snippet, f.location.line, f.location.snippet_start_line) : null,
+      h("div", { class: "tech" }, h("dl", null, tech)));
+    return h("details", { class: "finding sev-" + f.severity, id: f.id }, summary, body);
+  }
+
+  var sorted = R.vulnerabilities.slice().sort(function (a, b) {
+    return SEV_RANK[a.severity] - SEV_RANK[b.severity] || CONF_RANK[a.confidence] - CONF_RANK[b.confidence] || a.id.localeCompare(b.id);
+  });
+  var findingEls = {};
+  sorted.forEach(function (f) { findingEls[f.id] = findingEl(f); });
+  function haystack(f) {
+    var p = f.affected_package ? byId[f.affected_package] : null;
+    return [f.id, f.title, p ? p.name : "", f.location && f.location.file, (f.cwe || []).join(" "), f.advisory ? f.advisory.ids.join(" ") : ""].join(" ").toLowerCase();
+  }
+  function renderFindings() {
+    var cat = $("f-cat").value, q = $("f-search").value.trim().toLowerCase(), list = $("findings"), shown = 0;
+    list.textContent = "";
+    sorted.forEach(function (f) {
+      if (!sevOn[f.severity] || (cat && f.category !== cat) || (q && haystack(f).indexOf(q) === -1)) return;
+      list.append(findingEls[f.id]); shown++;
+    });
+    if (!shown) list.append(h("div", { class: "card empty", text: sorted.length ? "No vulnerabilities match these filters." : "No vulnerabilities were found by the checks listed above." }));
+    $("find-count").textContent = shown === sorted.length ? plural(sorted.length, "finding") : shown + " of " + sorted.length + " shown";
+  }
+  ["f-cat", "f-search"].forEach(function (id) { $(id).addEventListener("input", renderFindings); });
+
+  function openFinding(id) {
+    var el = findingEls[id];
+    if (!el) return;
+    if (!el.isConnected) {
+      SEV.forEach(function (s) { sevOn[s] = true; });
+      document.querySelectorAll("#sev-filters button:not([disabled])").forEach(function (b) { b.setAttribute("aria-pressed", "true"); });
+      $("f-cat").value = ""; $("f-search").value = ""; renderFindings();
+    }
+    el.open = true;
+    el.scrollIntoView({ block: "start", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  }
+  document.addEventListener("click", function (e) {
+    var a = e.target.closest && e.target.closest("[data-open]");
+    if (!a) return;
+    e.preventDefault();
+    openFinding(a.getAttribute("data-open"));
+    try { history.replaceState(null, "", "#" + a.getAttribute("data-open")); } catch (_) {}
+  });
+
+  // Dependencies
+  $("inv-line").textContent = "Languages: " + R.inventory.languages.map(function (l) { return l.name; }).join(", ") + ". Support status comes from endoflife.date, the package registries and the projects' own policies.";
+  var sc = R.summary.support_counts, scTotal = 0;
+  STATUS.forEach(function (s) { scTotal += sc[s] || 0; });
+  STATUS.forEach(function (s) {
+    var n = sc[s] || 0;
+    if (n) $("support-bar").append(h("span", { class: "st-" + s, style: "flex:" + n, title: n + " " + STATUS_LABEL[s] }));
+    $("legend").append(h("span", { class: n ? "" : "zero", title: STATUS_HELP[s] }, statusEl({ status: s }), " ", h("b", { text: String(n) })));
+  });
+  $("support-bar").setAttribute("aria-label", STATUS.map(function (s) { return (sc[s] || 0) + " " + STATUS_LABEL[s]; }).join(", ") + " of " + scTotal);
+
+  function techCard(item, kind) {
+    var s = item.support || {};
+    return h("div", { class: "card tech-card" + (s.out_of_support ? " oos" : "") },
+      h("span", { class: "label", text: kind }),
+      h("div", { class: "top" }, h("span", { class: "name", text: item.name }), h("span", { class: "mono", text: (item.version || "unknown") + (item.version_confidence === "range" ? ".x" : "") })),
+      statusEl(s),
+      s.reason ? h("p", { class: "why", text: s.reason }) : null,
+      h("p", { class: "where", text: "Found in " + item.evidence.join(", ") }));
+  }
+  R.inventory.runtimes.forEach(function (r) { $("tech-cards").append(techCard(r, "Runtime")); });
+  R.inventory.frameworks.forEach(function (f) { $("tech-cards").append(techCard(f, "Framework · " + f.category.replace(/-/g, " "))); });
+
+  var scopes = [];
+  R.inventory.libraries.forEach(function (l) { if (l.scope && scopes.indexOf(l.scope) < 0) scopes.push(l.scope); });
+  scopes.forEach(function (s) { $("lib-scope").append(h("option", { value: s, text: cap(s) })); });
+
+  var libCols = [{ key: "name", label: "Package" }, { key: "version", label: "Version" }, { key: "support", label: "Support" }, { key: "license", label: "License" }, { key: "vulns", label: "Findings" }];
+  var libSort = { key: "attention", dir: 1 };
+  libCols.forEach(function (c) {
+    var b = h("button", { type: "button", text: c.label });
+    b.addEventListener("click", function () { libSort = { key: c.key, dir: libSort.key === c.key ? -libSort.dir : (c.key === "vulns" ? -1 : 1) }; renderLibs(); });
+    $("lib-head").append(h("th", { "data-key": c.key, "aria-sort": "none" }, b));
+  });
+  function needsAttention(l) { return l.vulnerability_ids.length > 0 || (l.support && l.support.out_of_support); }
+  function libVal(l, k) {
+    if (k === "attention") return (needsAttention(l) ? 0 : 1) * 100 + STATUS.indexOf((l.support && l.support.status) || "unknown");
+    if (k === "support") return STATUS.indexOf((l.support && l.support.status) || "unknown");
+    if (k === "vulns") return l.vulnerability_ids.length;
+    return String(l[k] || "").toLowerCase();
+  }
+  function renderLibs() {
+    var q = $("lib-search").value.trim().toLowerCase(), show = $("lib-show").value, scope = $("lib-scope").value;
+    var rows = R.inventory.libraries.filter(function (l) {
+      return (show === "all" || (show === "direct" && l.direct) || (show === "attention" && needsAttention(l))) &&
+             (!scope || l.scope === scope) && (!q || (l.name + " " + l.version + " " + (l.license || "")).toLowerCase().indexOf(q) > -1);
+    }).sort(function (a, b) {
+      var x = libVal(a, libSort.key), y = libVal(b, libSort.key);
+      return (x < y ? -1 : x > y ? 1 : 0) * libSort.dir || a.name.localeCompare(b.name);
+    });
+    document.querySelectorAll("#lib-head th").forEach(function (th) {
+      var on = th.dataset.key === libSort.key;
+      th.setAttribute("aria-sort", on ? (libSort.dir > 0 ? "ascending" : "descending") : "none");
+      th.querySelector("button").textContent = libCols.filter(function (c) { return c.key === th.dataset.key; })[0].label + (on ? (libSort.dir > 0 ? " ↑" : " ↓") : "");
+    });
+    var body = $("lib-body"); body.textContent = "";
+    rows.forEach(function (l) {
+      var st = (l.support && l.support.status) || "unknown";
+      var sub = [cap(l.scope), l.direct ? "direct" : "transitive" + (l.introduced_by.length ? " via " + l.introduced_by.join(" → ") : ""),
+        l.workspace ? "in " + l.workspace : null, l.vendored ? "vendored file" : null, l.private ? "private" : null,
+        (l.found_by || []).length ? "found only by " + l.found_by.join(", ") : null].filter(Boolean).join(" · ");
+      body.append(h("tr", { class: needsAttention(l) ? "attn " + (l.vulnerability_ids.length ? "sev-high" : "st-" + st) : null },
+        h("td", null, h("div", { class: "mono", text: l.name }), h("div", { class: "sub", text: sub })),
+        h("td", { class: "mono", text: (l.version || "unknown") + (l.version_confidence === "range" ? " (declared range)" : "") }),
+        h("td", { title: (l.support && l.support.reason) || "" }, statusEl(l.support)),
+        h("td", { text: l.license || "Unknown" }),
+        h("td", null, l.vulnerability_ids.length ? h("span", { class: "links" }, l.vulnerability_ids.map(function (id) { return h("a", { href: "#" + id, class: "ref", "data-open": id, text: id }); })) : h("span", { class: "muted", text: "None" }))));
+    });
+    if (!rows.length) body.append(h("tr", null, h("td", { colspan: "5", class: "empty", text: "No packages match these filters." })));
+    $("lib-count").textContent = rows.length + " of " + R.inventory.libraries.length + " packages";
+  }
+  ["lib-search", "lib-show", "lib-scope"].forEach(function (id) { $(id).addEventListener("input", renderLibs); });
+
+  // Suppressed
+  R.suppressed.forEach(function (s) {
+    var what = [s.finding_id, s.advisory_id, s.rule].filter(Boolean).join(" · ");
+    $("suppressed").append(h("tr", null, h("td", null, h("div", { text: s.title || s.advisory_id || s.rule }), h("div", { class: "sub mono", text: what })),
+      h("td", { class: "mono", text: s.affected_package || "" }),
+      h("td", { class: "mono", text: s.location && s.location.file ? s.location.file + (s.location.line ? ":" + s.location.line : "") : "" }), h("td", { text: s.reason })));
+  });
+  if (!R.suppressed.length) $("suppressed").append(h("tr", null, h("td", { class: "muted", colspan: "4", text: "Nothing was suppressed." })));
+  $("h-suppressed").textContent = "Suppressed findings (" + R.suppressed.length + ")";
+
+  // Footer
+  [["Report", R.report_id], ["Schema", R.schema_version], ["Tool", R.tool.name + " " + R.tool.version], ["Model", R.tool.agent_model], ["Data", "dependency-report.json"]]
+    .forEach(function (f) { $("footer").append(h("span", null, f[0] + " ", h("span", { class: "mono", text: f[1] }))); });
+
+  // Print with every finding open.
+  window.addEventListener("beforeprint", function () { Object.keys(findingEls).forEach(function (k) { findingEls[k].open = true; }); });
+
+  renderLibs();
+  renderFindings();
+  if (/^#F-\d{3,}$/.test(location.hash)) openFinding(location.hash.slice(1));
+  window.addEventListener("hashchange", function () { if (/^#F-\d{3,}$/.test(location.hash)) openFinding(location.hash.slice(1)); });
+})();
+</script>
+</body>
+</html>

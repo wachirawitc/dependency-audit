@@ -1,0 +1,150 @@
+# rules/support_sources.yaml
+#
+# Where check_support.py looks up support status (spec Step 3). Hard rule 2: every status other
+# than "unknown", and every end-of-life date, must come from a source fetched during the run. So
+# this file only says WHERE to look, never what the answer is.
+#
+# Order of trust: endoflife.date (runtimes and frameworks) > the project's own support-policy page >
+# package registry metadata > repository signals (archived flag, last release).
+#
+# endoflife.date product slugs come from https://endoflife.date/api/all.json (checked 2026-11-10).
+# A version is matched to the release cycle that is its longest dotted prefix: "3.2.25" -> "3.2",
+# "20.11.1" -> "20", "4.6.2" -> "4.6.2", "8.0" -> "8" when the product publishes cycle "8".
+#
+# Package keys use these ecosystem names: npm, pypi, maven (group:artifact), go, cargo, gem,
+# composer, nuget, pub, cocoapods, swift. A trailing * matches any suffix.
+
+runtimes:
+  - runtime: Node.js
+    id: nodejs
+    endoflife_product: nodejs
+    images: [node, cimg/node, circleci/node, bitnami/node]
+  - runtime: Python
+    id: python
+    endoflife_product: python
+    images: [python, cimg/python, circleci/python, bitnami/python]
+  - runtime: Java
+    id: java
+    # Support for a Java version depends on the vendor. Without a vendor (pom.xml, Gradle,
+    # .java-version) the community OpenJDK builds from Eclipse Temurin are the reference, and the
+    # support reason says so. Images name their vendor.
+    endoflife_product: eclipse-temurin
+    images:
+      - { image: eclipse-temurin, endoflife_product: eclipse-temurin }
+      - { image: amazoncorretto, endoflife_product: amazon-corretto }
+      - { image: azul/zulu-openjdk, endoflife_product: azul-zulu }
+      - { image: mcr.microsoft.com/openjdk/jdk, endoflife_product: microsoft-build-of-openjdk }
+      - { image: openjdk, endoflife_product: openjdk-builds-from-oracle }
+  - runtime: .NET Framework
+    id: dotnetfx
+    endoflife_product: dotnetfx        # cycles "4.5.2", "4.6", "4.6.1", "4.6.2", "4.7", ..., "4.8.1"
+    images: [mcr.microsoft.com/dotnet/framework/aspnet, mcr.microsoft.com/dotnet/framework/runtime, mcr.microsoft.com/dotnet/framework/sdk]
+  - runtime: .NET
+    id: dotnet
+    endoflife_product: dotnet          # cycles "8", "9", "10" (older ones "6.0", "3.1")
+    images: [mcr.microsoft.com/dotnet/aspnet, mcr.microsoft.com/dotnet/runtime, mcr.microsoft.com/dotnet/runtime-deps, mcr.microsoft.com/dotnet/sdk]
+  - runtime: Go
+    id: go
+    endoflife_product: go
+    images: [golang, cimg/go, circleci/golang]
+  - runtime: Ruby
+    id: ruby
+    endoflife_product: ruby
+    images: [ruby, cimg/ruby, circleci/ruby]
+  - runtime: PHP
+    id: php
+    endoflife_product: php
+    images: [php, cimg/php, circleci/php, bitnami/php-fpm]
+  - runtime: Rust
+    id: rust
+    endoflife_product: rust
+    images: [rust, cimg/rust]
+  - runtime: Deno
+    id: deno
+    endoflife_product: deno
+    images: [denoland/deno]
+  - runtime: Bun
+    id: bun
+    endoflife_product: bun
+    images: [oven/bun]
+  - runtime: Alpine Linux
+    id: alpine-linux
+    endoflife_product: alpine-linux
+    images: [alpine]
+    tag_suffix: alpine                 # node:20-alpine3.19 -> Alpine Linux 3.19
+  - runtime: Debian
+    id: debian
+    endoflife_product: debian
+    images: [debian]
+    codenames: { jessie: "8", stretch: "9", buster: "10", bullseye: "11", bookworm: "12", trixie: "13" }
+  - runtime: Ubuntu
+    id: ubuntu
+    endoflife_product: ubuntu
+    images: [ubuntu]
+    codenames: { xenial: "16.04", bionic: "18.04", focal: "20.04", jammy: "22.04", noble: "24.04" }
+  - runtime: Amazon Linux
+    id: amazon-linux
+    endoflife_product: amazon-linux
+    images: [amazonlinux]
+
+packages:
+  # Frameworks and libraries with published release cycles on endoflife.date.
+  - { endoflife_product: express, packages: { npm: [express] } }
+  - { endoflife_product: nestjs, packages: { npm: ["@nestjs/core", "@nestjs/common"] } }
+  - { endoflife_product: react, packages: { npm: [react, react-dom] } }
+  - { endoflife_product: react-native, packages: { npm: [react-native] } }
+  - { endoflife_product: nextjs, packages: { npm: [next] } }
+  - { endoflife_product: nuxt, packages: { npm: [nuxt] } }
+  - { endoflife_product: vue, packages: { npm: [vue] } }
+  - { endoflife_product: vuetify, packages: { npm: [vuetify] } }
+  - { endoflife_product: angular, packages: { npm: ["@angular/core", "@angular/common", "@angular/compiler", "@angular/router", "@angular/forms", "@angular/platform-browser"] } }
+  - { endoflife_product: angularjs, packages: { npm: [angular] } }
+  - { endoflife_product: svelte, packages: { npm: [svelte] } }
+  - { endoflife_product: emberjs, packages: { npm: [ember-source] } }
+  - { endoflife_product: electron, packages: { npm: [electron] } }
+  - { endoflife_product: ionic, packages: { npm: ["@ionic/core", "@ionic/angular", "@ionic/react", "@ionic/vue"] } }
+  # jQuery and Bootstrap are also published on NuGet (old ASP.NET projects) and Packagist with the
+  # same version numbers.
+  - { endoflife_product: jquery, packages: { npm: [jquery], nuget: [jQuery] } }
+  - { endoflife_product: jquery-ui, packages: { npm: [jquery-ui, jquery-ui-dist], nuget: [jQuery.UI.Combined] } }
+  - { endoflife_product: bootstrap, packages: { npm: [bootstrap], nuget: [bootstrap], composer: [twbs/bootstrap] } }
+  - { endoflife_product: django, packages: { pypi: [django] } }
+  - { endoflife_product: numpy, packages: { pypi: [numpy] } }
+  - { endoflife_product: rails, packages: { gem: [rails, railties, actionpack, activerecord, activesupport, actionview, activemodel, actioncable, activejob, actionmailer] } }
+  - { endoflife_product: laravel, packages: { composer: [laravel/framework] } }
+  - { endoflife_product: symfony, packages: { composer: [symfony/symfony, symfony/framework-bundle, symfony/http-kernel, symfony/http-foundation, symfony/console, symfony/routing, symfony/security-bundle] } }
+  - { endoflife_product: drupal, packages: { composer: [drupal/core, drupal/core-recommended] } }
+  - { endoflife_product: cakephp, packages: { composer: [cakephp/cakephp] } }
+  - { endoflife_product: spring-boot, packages: { maven: ["org.springframework.boot:spring-boot*"] } }
+  - { endoflife_product: spring-framework, packages: { maven: ["org.springframework:spring-*"] } }
+  - { endoflife_product: spring-security, packages: { maven: ["org.springframework.security:spring-security-*"] } }
+  - { endoflife_product: hibernate-orm, packages: { maven: ["org.hibernate:hibernate-core", "org.hibernate.orm:hibernate-core"] } }
+  - { endoflife_product: log4j, packages: { maven: ["org.apache.logging.log4j:log4j-core", "org.apache.logging.log4j:log4j-api", "log4j:log4j"] } }
+  - { endoflife_product: tomcat, packages: { maven: ["org.apache.tomcat.embed:tomcat-embed-core", "org.apache.tomcat:tomcat-catalina"] } }
+  - { endoflife_product: eclipse-jetty, packages: { maven: ["org.eclipse.jetty:jetty-server"] } }
+  - { endoflife_product: quarkus-framework, packages: { maven: ["io.quarkus:quarkus-core"] } }
+  - { endoflife_product: micronaut, packages: { maven: ["io.micronaut:micronaut-core", "io.micronaut:micronaut-inject"] } }
+  - { endoflife_product: apache-struts, packages: { maven: ["org.apache.struts:struts2-core", "struts:struts"] } }
+  - { endoflife_product: grails, packages: { maven: ["org.grails:grails-core"] } }
+  - { endoflife_product: kotlin, packages: { maven: ["org.jetbrains.kotlin:kotlin-stdlib"] } }
+  - endoflife_product: dotnet
+    # ASP.NET Core, EF Core and the runtime's Microsoft.Extensions.* libraries ship with .NET, carry its
+    # version numbers and follow its support policy. A version with no matching .NET cycle (for
+    # example System.Text.Json 4.7.2) falls back to the NuGet registry check. Microsoft.Extensions.*
+    # packages that ship on their own schedule (Microsoft.Extensions.AI, ...Http.Resilience) are not listed.
+    packages:
+      nuget: [Microsoft.AspNetCore.App, Microsoft.NETCore.App, "Microsoft.AspNetCore.*", "Microsoft.EntityFrameworkCore*",
+              "Microsoft.Extensions.Logging*", "Microsoft.Extensions.DependencyInjection*", "Microsoft.Extensions.Configuration*",
+              "Microsoft.Extensions.Hosting*", "Microsoft.Extensions.Options*", "Microsoft.Extensions.Caching.*",
+              "Microsoft.Extensions.Primitives", "Microsoft.Extensions.FileProviders.*", Microsoft.Extensions.Http,
+              System.Text.Json]
+
+policies: []
+  # Projects without an endoflife.date entry that publish their own support policy (source 2).
+  # check_support.py fetches each page during the run and saves its text under raw/policies/; the
+  # agent reads it and decides the status (support_overrides in triage.json). Add an entry only
+  # for a page that states which version lines still get fixes, for example:
+  #
+  # - name: Example Framework
+  #   url: https://example.org/support-policy
+  #   packages: { npm: [example-framework] }

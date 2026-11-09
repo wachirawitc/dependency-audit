@@ -1,0 +1,350 @@
+# rules/frameworks.yaml
+#
+# Package -> framework mapping for detect_inventory.py (spec Step 2). A framework is a library that
+# shapes the application. It is reported once per workspace, and its support object is copied from
+# the matching library entry, so a framework is only reported when one of its packages is in the
+# inventory. Signals are extra evidence (file names or globs, relative to the workspace root).
+#
+# Ecosystem keys: npm, pypi, maven (group:artifact), go, cargo, gem, composer, nuget, pub, swift.
+# A trailing * in a package name matches any suffix.
+# Categories: web-fullstack, web-backend, ui, mobile, desktop, orm, api, task-queue, cms.
+
+# --- JavaScript / TypeScript
+- framework: Next.js
+  category: web-fullstack
+  packages: { npm: [next] }
+  signals: [next.config.js, next.config.mjs, next.config.ts, app/layout.tsx, app/layout.jsx, pages/_app.tsx, pages/_app.jsx, src/app/layout.tsx]
+- framework: Nuxt
+  category: web-fullstack
+  packages: { npm: [nuxt] }
+  signals: [nuxt.config.ts, nuxt.config.js]
+- framework: SvelteKit
+  category: web-fullstack
+  packages: { npm: ["@sveltejs/kit"] }
+  signals: [svelte.config.js]
+- framework: Remix
+  category: web-fullstack
+  packages: { npm: ["@remix-run/react", "@remix-run/node"] }
+  signals: [remix.config.js]
+- framework: Astro
+  category: web-fullstack
+  packages: { npm: [astro] }
+  signals: [astro.config.mjs, astro.config.ts]
+- framework: Gatsby
+  category: web-fullstack
+  packages: { npm: [gatsby] }
+  signals: [gatsby-config.js, gatsby-config.ts]
+- framework: React
+  category: ui
+  packages: { npm: [react] }
+  signals: [src/App.tsx, src/App.jsx, src/main.tsx, src/index.tsx]
+- framework: Vue
+  category: ui
+  packages: { npm: [vue] }
+  signals: [vue.config.js, src/App.vue]
+- framework: Angular
+  category: ui
+  packages: { npm: ["@angular/core"] }
+  signals: [angular.json]
+- framework: AngularJS
+  category: ui
+  packages: { npm: [angular] }
+  signals: []
+- framework: Svelte
+  category: ui
+  packages: { npm: [svelte] }
+  signals: [svelte.config.js]
+- framework: Ember.js
+  category: ui
+  packages: { npm: [ember-source] }
+  signals: [ember-cli-build.js]
+- framework: jQuery
+  category: ui
+  packages: { npm: [jquery] }
+  signals: []
+- framework: Bootstrap
+  category: ui
+  packages: { npm: [bootstrap] }
+  signals: []
+- framework: Vuetify
+  category: ui
+  packages: { npm: [vuetify] }
+  signals: []
+- framework: Express
+  category: web-backend
+  packages: { npm: [express] }
+  signals: [app.js, server.js, src/app.ts, src/server.ts]
+- framework: NestJS
+  category: web-backend
+  packages: { npm: ["@nestjs/core"] }
+  signals: [nest-cli.json]
+- framework: Fastify
+  category: web-backend
+  packages: { npm: [fastify] }
+  signals: []
+- framework: Koa
+  category: web-backend
+  packages: { npm: [koa] }
+  signals: []
+- framework: hapi
+  category: web-backend
+  packages: { npm: ["@hapi/hapi", hapi] }
+  signals: []
+- framework: Electron
+  category: desktop
+  packages: { npm: [electron] }
+  signals: [electron-builder.json, forge.config.js]
+- framework: React Native
+  category: mobile
+  packages: { npm: [react-native] }
+  signals: [metro.config.js, app.json]
+- framework: Ionic
+  category: mobile
+  packages: { npm: ["@ionic/angular", "@ionic/react", "@ionic/vue", "@ionic/core"] }
+  signals: [ionic.config.json, capacitor.config.ts, capacitor.config.json]
+- framework: Prisma
+  category: orm
+  packages: { npm: ["@prisma/client"] }
+  signals: [prisma/schema.prisma, schema.prisma]
+- framework: TypeORM
+  category: orm
+  packages: { npm: [typeorm] }
+  signals: [ormconfig.json, ormconfig.js]
+- framework: Sequelize
+  category: orm
+  packages: { npm: [sequelize] }
+  signals: [.sequelizerc]
+- framework: Mongoose
+  category: orm
+  packages: { npm: [mongoose] }
+  signals: []
+
+# --- Python
+- framework: Django
+  category: web-backend
+  packages: { pypi: [django] }
+  signals: [manage.py, "**/settings.py"]
+- framework: Django REST framework
+  category: api
+  packages: { pypi: [djangorestframework] }
+  signals: []
+- framework: Flask
+  category: web-backend
+  packages: { pypi: [flask] }
+  signals: [app.py, wsgi.py]
+- framework: FastAPI
+  category: web-backend
+  packages: { pypi: [fastapi] }
+  signals: [main.py, app/main.py]
+- framework: aiohttp
+  category: web-backend
+  packages: { pypi: [aiohttp] }
+  signals: []
+- framework: Tornado
+  category: web-backend
+  packages: { pypi: [tornado] }
+  signals: []
+- framework: Pyramid
+  category: web-backend
+  packages: { pypi: [pyramid] }
+  signals: [development.ini, production.ini]
+- framework: SQLAlchemy
+  category: orm
+  packages: { pypi: [sqlalchemy] }
+  signals: [alembic.ini]
+- framework: Celery
+  category: task-queue
+  packages: { pypi: [celery] }
+  signals: [celeryconfig.py]
+
+# --- Java / Kotlin
+- framework: Spring Boot
+  category: web-backend
+  packages: { maven: ["org.springframework.boot:spring-boot*"] }
+  signals: ["**/application.properties", "**/application.yml", "**/application.yaml"]
+- framework: Spring Framework
+  category: web-backend
+  packages: { maven: ["org.springframework:spring-webmvc", "org.springframework:spring-web", "org.springframework:spring-context", "org.springframework:spring-core"] }
+  signals: []
+- framework: Quarkus
+  category: web-backend
+  packages: { maven: ["io.quarkus:quarkus-core", "io.quarkus:quarkus-resteasy*", "io.quarkus:quarkus-rest*"] }
+  signals: []
+- framework: Micronaut
+  category: web-backend
+  packages: { maven: ["io.micronaut:micronaut-core", "io.micronaut:micronaut-inject", "io.micronaut:micronaut-http-server*"] }
+  signals: [micronaut-cli.yml]
+- framework: Apache Struts
+  category: web-backend
+  packages: { maven: ["org.apache.struts:struts2-core", "struts:struts"] }
+  signals: ["**/struts.xml"]
+- framework: Vert.x
+  category: web-backend
+  packages: { maven: ["io.vertx:vertx-core", "io.vertx:vertx-web"] }
+  signals: []
+- framework: Dropwizard
+  category: web-backend
+  packages: { maven: ["io.dropwizard:dropwizard-core"] }
+  signals: []
+- framework: Ktor
+  category: web-backend
+  packages: { maven: ["io.ktor:ktor-server-core*"] }
+  signals: []
+- framework: Grails
+  category: web-fullstack
+  packages: { maven: ["org.grails:grails-core"] }
+  signals: [grails-app]
+- framework: Hibernate ORM
+  category: orm
+  packages: { maven: ["org.hibernate:hibernate-core", "org.hibernate.orm:hibernate-core"] }
+  signals: ["**/persistence.xml", "**/hibernate.cfg.xml"]
+
+# --- .NET
+- framework: ASP.NET Core
+  category: web-backend
+  # Microsoft.AspNetCore.App is the shared framework that an SDK-style web project
+  # (Sdk="Microsoft.NET.Sdk.Web") references implicitly; detect_inventory.py records it.
+  packages: { nuget: [Microsoft.AspNetCore.App, Microsoft.AspNetCore.Mvc, Microsoft.AspNetCore.All] }
+  signals: [Program.cs, Startup.cs, appsettings.json]
+- framework: ASP.NET MVC
+  category: web-backend
+  packages: { nuget: [Microsoft.AspNet.Mvc] }
+  signals: [Global.asax, Web.config]
+- framework: ASP.NET Web API
+  category: api
+  packages: { nuget: [Microsoft.AspNet.WebApi.Core, Microsoft.AspNet.WebApi] }
+  signals: [Global.asax]
+- framework: Entity Framework Core
+  category: orm
+  packages: { nuget: [Microsoft.EntityFrameworkCore] }
+  signals: []
+- framework: Entity Framework 6
+  category: orm
+  packages: { nuget: [EntityFramework] }
+  signals: []
+- framework: .NET MAUI
+  category: mobile
+  packages: { nuget: [Microsoft.Maui.Controls] }
+  signals: []
+- framework: Xamarin.Forms
+  category: mobile
+  packages: { nuget: [Xamarin.Forms] }
+  signals: []
+- framework: Avalonia
+  category: desktop
+  packages: { nuget: [Avalonia] }
+  signals: []
+
+# --- Go
+- framework: Gin
+  category: web-backend
+  packages: { go: [github.com/gin-gonic/gin] }
+  signals: []
+- framework: Echo
+  category: web-backend
+  packages: { go: ["github.com/labstack/echo*"] }
+  signals: []
+- framework: Fiber
+  category: web-backend
+  packages: { go: ["github.com/gofiber/fiber*"] }
+  signals: []
+- framework: chi
+  category: web-backend
+  packages: { go: ["github.com/go-chi/chi*"] }
+  signals: []
+- framework: Gorilla mux
+  category: web-backend
+  packages: { go: [github.com/gorilla/mux] }
+  signals: []
+- framework: Beego
+  category: web-backend
+  packages: { go: ["github.com/beego/beego*", github.com/astaxie/beego] }
+  signals: []
+- framework: GORM
+  category: orm
+  packages: { go: [gorm.io/gorm, github.com/jinzhu/gorm] }
+  signals: []
+
+# --- Rust
+- framework: Actix Web
+  category: web-backend
+  packages: { cargo: [actix-web] }
+  signals: []
+- framework: Axum
+  category: web-backend
+  packages: { cargo: [axum] }
+  signals: []
+- framework: Rocket
+  category: web-backend
+  packages: { cargo: [rocket] }
+  signals: [Rocket.toml]
+- framework: Warp
+  category: web-backend
+  packages: { cargo: [warp] }
+  signals: []
+- framework: Diesel
+  category: orm
+  packages: { cargo: [diesel] }
+  signals: [diesel.toml]
+- framework: Tauri
+  category: desktop
+  packages: { cargo: [tauri] }
+  signals: [tauri.conf.json, src-tauri/tauri.conf.json]
+
+# --- Ruby
+- framework: Ruby on Rails
+  category: web-fullstack
+  packages: { gem: [rails, railties] }
+  signals: [config/application.rb, bin/rails]
+- framework: Sinatra
+  category: web-backend
+  packages: { gem: [sinatra] }
+  signals: [config.ru]
+- framework: Hanami
+  category: web-backend
+  packages: { gem: [hanami] }
+  signals: []
+- framework: Sidekiq
+  category: task-queue
+  packages: { gem: [sidekiq] }
+  signals: [config/sidekiq.yml]
+
+# --- PHP
+- framework: Laravel
+  category: web-fullstack
+  packages: { composer: [laravel/framework] }
+  signals: [artisan]
+- framework: Symfony
+  category: web-backend
+  packages: { composer: [symfony/framework-bundle, symfony/symfony] }
+  signals: [symfony.lock, bin/console]
+- framework: CakePHP
+  category: web-fullstack
+  packages: { composer: [cakephp/cakephp] }
+  signals: [bin/cake]
+- framework: CodeIgniter
+  category: web-fullstack
+  packages: { composer: [codeigniter4/framework, codeigniter/framework] }
+  signals: [spark]
+- framework: Yii
+  category: web-fullstack
+  packages: { composer: [yiisoft/yii2] }
+  signals: [yii]
+- framework: Slim
+  category: web-backend
+  packages: { composer: [slim/slim] }
+  signals: []
+- framework: Drupal
+  category: cms
+  packages: { composer: [drupal/core, drupal/core-recommended] }
+  signals: [web/core/lib/Drupal.php]
+
+# --- Dart / Swift
+- framework: Flutter
+  category: mobile
+  packages: { pub: [flutter] }
+  signals: [lib/main.dart]
+- framework: Vapor
+  category: web-backend
+  packages: { swift: [github.com/vapor/vapor] }
+  signals: []

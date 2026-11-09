@@ -1,0 +1,150 @@
+# rules/requirements.yaml
+#
+# What /dependency-audit --setup and --setup-dry check, and how --setup fixes each gap (spec §2).
+# setup_check.py reads this file and reports. It never installs anything. --setup shows the fix
+# commands as a plan and runs them only after the user approves (hard rule 5).
+#
+# Everything installs at user level: no sudo, no admin rights, no system-wide installs, and no
+# download is ever piped into a shell. A release binary is checked against its release's SHA-256
+# checksums file before it is used (install_release.py).
+#
+# Versions are pinned. Before raising install_version, read the release notes and list the MCP
+# tools the new version exposes: the skill calls scan_vulnerable_dependencies and
+# get_vulnerability_details only, and never ignore_vulnerability (spec §2 "Prerequisites").
+#
+# Command placeholders: {version} (install_version), {os} (windows, darwin, linux),
+# {arch} (amd64, arm64), {exe} (".exe" on Windows, otherwise empty).
+
+python:
+  min_version: "3.11"
+  needed_for: "Every script. They use the standard library only (open question 10); tomllib needs 3.11."
+  impact: blocks
+  hint:
+    windows: "Install Python 3.11 or later from python.org, or run: winget install --scope user Python.Python.3.13"
+    darwin: "Install Python 3.11 or later from python.org, or run: brew install python@3.13"
+    linux: "Install Python 3.11 or later from your distribution's packages, pyenv or uv."
+
+# The skill's own files. Missing or unreadable means the package is incomplete, and an audit can't run.
+skill_files:
+  - scripts/common.py
+  - scripts/detect_inventory.py
+  - scripts/check_support.py
+  - scripts/run_scanners.py
+  - scripts/query_osv.py
+  - scripts/build_report.py
+  - scripts/validate_report.py
+  - scripts/render_html.py
+  - schema/report.schema.json
+  - templates/report.html.tmpl
+  - rules/frameworks.yaml
+  - rules/support_sources.yaml
+
+binaries:
+  - id: osv-scanner
+    name: osv-scanner
+    needed_for: "Step 4.1: the osv-scanner MCP server and the CLI fallback"
+    min_version: "2.2.4"
+    # 2.7.0 was released 2026-10-12. 2.7.1 (2026-11-09) only fixes Rust call analysis, which the
+    # skill turns off, and the text of the ignore_vulnerability tool, which it never calls.
+    install_version: "2.7.0"
+    impact: degrades
+    impact_why: "No MCP scan and no CLI fallback: vulnerabilities come from query_osv.py's batch query over the inventory alone, which misses packages osv-scanner resolves itself (pom.xml transitive dependencies)."
+    notes:
+      - below: "2.3.2"
+        text: "Its get_vulnerability_details MCP tool fails before v2.3.2 (google/osv-scanner#2422); read raw/osv/<ID>.json instead."
+    methods:
+      # Each method's hosts are checked by `setup_check.py --mode setup` only, before downloading.
+      - method: go
+        requires: go
+        command: [go, install, "github.com/google/osv-scanner/v2/cmd/osv-scanner@v{version}"]
+        hosts: [proxy.golang.org, sum.golang.org]
+      - method: brew
+        requires: brew
+        os: [darwin, linux]
+        command: [brew, install, osv-scanner]
+        unpinned: "Homebrew installs the formula's current version, not install_version."
+        hosts: [formulae.brew.sh, ghcr.io]
+      - method: release
+        repo: google/osv-scanner
+        tag: "v{version}"
+        asset: "osv-scanner_{os}_{arch}{exe}"
+        checksums: osv-scanner_SHA256SUMS
+        os: [windows, darwin, linux]
+        arch: [amd64, arm64]
+        dest:
+          windows: "%LOCALAPPDATA%/Programs/osv-scanner"
+          default: "~/.local/bin"
+        hosts: [github.com, release-assets.githubusercontent.com, objects.githubusercontent.com]
+
+  - id: gopls
+    name: gopls
+    needed_for: "Step 4.7: Go reachability through the gopls MCP server"
+    allowed: false
+    reason: "Not used: open question 13 was answered so that gopls and govulncheck never run, because both load Go packages and may download modules. Go reachability is checked by hand."
+
+mcp_servers:
+  - id: osv-scanner-mcp
+    name: osv-scanner
+    binary: osv-scanner
+    args: [experimental-mcp]
+    scope: user
+    needed_for: "Step 4.1: the primary vulnerability scan"
+    impact: degrades
+    impact_why: "The audit falls back to the osv-scanner CLI, then to query_osv.py (Step 4.1), and lists osv-scanner-mcp under tools_missing."
+
+  - id: gopls-mcp
+    name: gopls
+    binary: gopls
+    args: [mcp]
+    scope: user
+    allowed: false
+    reason: "Not used: open question 13 (see gopls)."
+
+# Step 4.4. Detected and reported only (open question 16): --setup never installs these.
+optional_scanners:
+  - id: npm-audit
+    commands: [npm]
+    ecosystems: [npm]
+  - id: pip-audit
+    commands: [pip-audit]
+    ecosystems: [PyPI]
+  - id: cargo-audit
+    commands: [cargo-audit, "cargo audit"]
+    ecosystems: [crates.io]
+  - id: bundle-audit
+    commands: [bundle-audit, bundler-audit]
+    ecosystems: [RubyGems]
+  - id: composer-audit
+    commands: [composer]
+    ecosystems: [Packagist]
+  - id: dotnet-list-package
+    commands: [dotnet]
+    ecosystems: [NuGet]
+  - id: trivy
+    commands: [trivy]
+    ecosystems: all
+  - id: govulncheck
+    allowed: false
+    reason: "Never run: it loads Go packages (open question 13)."
+
+# Hard rule 5's hosts. --setup-dry sends one plain HTTPS request to each (no package names) to
+# check it can be reached. An unreachable host makes that part of an audit offline. The hosts of
+# the support-policy pages in support_sources.yaml are added automatically.
+hosts:
+  - {host: api.osv.dev, for: "Vulnerability advisories (Steps 4.1-4.3)", ecosystems: all}
+  - {host: endoflife.date, for: "Runtime and framework end-of-life dates (Step 3)", ecosystems: all}
+  - {host: api.github.com, for: "Archived flag and last release (unmaintained check)", ecosystems: all}
+  - {host: gitlab.com, for: "Archived flag and last release (unmaintained check)", ecosystems: all}
+  - {host: registry.npmjs.org, for: "npm deprecation and release data", ecosystems: [npm]}
+  - {host: pypi.org, for: "PyPI yanked flags and release data", ecosystems: [PyPI]}
+  - {host: repo1.maven.org, for: "Maven Central release data", ecosystems: [Maven]}
+  - {host: dl.google.com, for: "Google's Maven repository (Android artifacts)", ecosystems: [Maven]}
+  - {host: api.deps.dev, for: "osv-scanner's transitive resolution of pom.xml", ecosystems: [Maven]}
+  - {host: proxy.golang.org, for: "Go module release data", ecosystems: [Go]}
+  - {host: crates.io, for: "crates.io yanked flags and release data", ecosystems: [crates.io]}
+  - {host: index.crates.io, for: "crates.io index", ecosystems: [crates.io]}
+  - {host: rubygems.org, for: "RubyGems yanked versions and release data", ecosystems: [RubyGems]}
+  - {host: repo.packagist.org, for: "Packagist abandoned flags and release data", ecosystems: [Packagist]}
+  - {host: api.nuget.org, for: "NuGet deprecation (registration API)", ecosystems: [NuGet]}
+  - {host: pub.dev, for: "Pub discontinued flags and release data", ecosystems: [Pub]}
+  - {host: trunk.cocoapods.org, for: "CocoaPods release data", ecosystems: [CocoaPods]}

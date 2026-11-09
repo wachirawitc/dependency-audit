@@ -1,0 +1,19 @@
+stages: [test, build]
+
+test-web:
+  stage: test
+  image: python:3.8
+  script:
+    - cd services/web && pip install -r requirements-dev.txt && pytest
+
+test-frontend:
+  stage: test
+  image: node:16
+  script:
+    - cd web && corepack enable && pnpm install --frozen-lockfile && pnpm build
+
+build-ingest:
+  stage: build
+  image: golang:1.19
+  script:
+    - cd services/ingest && go build ./...

@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Skill eval runs: generated outputs, regenerate with the eval harness.
+# evals/ and fixtures/ stay tracked so runs can be reproduced.
+dependency-audit-workspace/iteration-*/
+
+# Local audit outputs
+dependency-report.json
+dependency-report.html
+!samples/dependency-report.json
+!samples/dependency-report.html
+
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
