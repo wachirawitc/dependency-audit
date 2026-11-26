@@ -4,7 +4,7 @@ An agent skill that audits a project's dependencies and writes the result as bot
 For every run it reports:
 
 - **Inventory**: the libraries, frameworks and runtimes the project uses, each with its support
-  status (supported, end-of-life, deprecated or unmaintained).
+  status (supported, security-only, end-of-life, deprecated, unmaintained or unknown).
 - **Vulnerabilities**: known advisories affecting those dependencies, plus out-of-support items that
   need action, each with severity, evidence and a fix.
 
