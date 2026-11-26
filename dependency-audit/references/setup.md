@@ -58,7 +58,7 @@ folders and the user-scope MCP configuration), never the project.
      method unless the user approves it.
    - Never use `sudo` or admin rights, never pipe a download into a shell, and never install outside
      user-level folders.
-5. **Verify.** Run `setup_check.py` again (without `--mode setup`) and report the statuses. Then tell the
+5. **Verify.** Run `setup_check.py` again with the same `[path]` (without `--mode setup`) and report the statuses. Then tell the
    user to **start a new session** so the newly registered MCP tools load, and to check them with `/mcp`.
 6. **Report** what was installed, registered and skipped, and why.
 
@@ -71,7 +71,8 @@ folders and the user-scope MCP configuration), never the project.
   for that name. That registration takes precedence in its project, and only the user should change it.
 - A user-scope registration with the same command is left alone. A stale one (its binary is gone) is
   replaced: the plan removes it and adds it again with the new path.
-- Never register servers the skill doesn't use. gopls stays off (open question 13), and so does govulncheck.
+- Never register servers the skill doesn't use. gopls stays off, and so does govulncheck: both load Go packages
+  and may download modules (open question 13).
 - Optional scanners (`pip-audit`, `cargo audit`, `trivy`, …) and Python itself are reported, never
   installed (open questions 10 and 16).
 - Without the `claude` CLI (another agent), the MCP fix is manual: tell the user to register
@@ -92,4 +93,5 @@ folders and the user-scope MCP configuration), never the project.
 
 Impact: `blocks` (the audit can't produce valid reports: Python or the skill's files), `degrades` (the
 audit runs with fallbacks or gaps), `none`. A missing osv-scanner has no impact on a project with private
-packages, because neither the MCP scan nor the CLI may run there anyway.
+packages, because neither the MCP scan nor the CLI may run there anyway; a missing MCP server has none on a
+project with Go modules, where the MCP scan is skipped.

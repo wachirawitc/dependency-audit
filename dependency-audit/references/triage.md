@@ -53,7 +53,7 @@ Judgment on a drafted finding, keyed by F-ID. Give only the fields that change.
 
 | Field | Values |
 |---|---|
-| `severity` | `critical`, `high`, `medium`, `low`, `info`. Always with a `severity_rationale` |
+| `severity` | `critical`, `high`, `medium`, `low`, `info`. Always give a `severity_rationale` with it (without one, `build` only warns) |
 | `severity_rationale` | Why the severity is what it is. Non-empty text |
 | `confidence` | `high`, `medium`, `low` (see the guide below) |
 | `reachability` | `{"status": "reachable" \| "not-reachable" \| "unknown", "evidence": "..."}`, or `null` to clear |
@@ -130,7 +130,8 @@ policy under `raw/policies/`. Keyed by library or runtime id.
 - Any status but `unknown`, or any date, needs `source` and an `evidence_file` under `raw/`. The page has to
   say it: an old major version on its own is not end-of-life (spec Step 3).
 - Frameworks take their library's support. A support finding follows from the new status by the usual
-  rules (runtime scope only; High for an end-of-life runtime or framework, Medium otherwise).
+  rules (runtime scope only; High for an out-of-support runtime or an end-of-life framework, Medium otherwise;
+  one level higher when the item also has a known vulnerability with no fixed version that isn't suppressed).
 
 ## summary and notes
 
