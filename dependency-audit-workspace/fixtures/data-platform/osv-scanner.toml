@@ -1,4 +1,0 @@
-# Accepted risks, reviewed 2024-03-02.
-[[IgnoredVulns]]
-id = "GHSA-cph5-m8f7-6c5x"
-reason = "Only used against our own API; the vulnerable header parsing is not reachable."
