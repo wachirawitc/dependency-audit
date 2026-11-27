@@ -21,6 +21,8 @@ Scanners and how each stays read-only (hard rule 5). Every scanner runs from a s
 raw/scanners/, never from the project, so repository config such as .npmrc credentials, .trivyignore,
 .bundler-audit.yml or composer's audit.ignore can't steer or hide results:
     osv-scanner          scan source -r --format json --config <empty file> --no-call-analysis=all
+                         --x-disable-plugins=directory, on raw/scan-input/ (copies of the manifests and
+                         lockfiles only: hard rule 0, no source file is ever in reach)
     npm-audit            npm audit --json --package-lock-only, on copies of package.json + the lockfile,
                          against the public registry
     pip-audit            pip-audit -f json -r <fully pinned requirements file> --no-deps --disable-pip
@@ -30,7 +32,8 @@ raw/scanners/, never from the project, so repository config such as .npmrc crede
                          composer.json (minus its audit settings and scripts) and composer.lock
     dotnet-list-package  dotnet list <project> package --vulnerable --include-transitive --format json,
                          only for projects already restored (obj/project.assets.json); never restores
-    trivy                trivy fs --scanners vuln --format json --offline-scan --ignorefile <empty file>
+    trivy                trivy fs --scanners vuln --format json --offline-scan --ignorefile <empty file>,
+                         on raw/scan-input/
     govulncheck          never run: it loads Go packages through the Go toolchain (open question 13)
 When the inventory has private packages, scanners that would send package names to a public service
 (osv-scanner, npm-audit, pip-audit, composer-audit) are skipped, and so is dotnet-list-package when a
@@ -120,6 +123,9 @@ class Runner:
         self.inv = inv
         self.args = args
         self.target = Path((inv.get("target") or {}).get("path") or ".")
+        # hard rule 0: osv-scanner and trivy read only this staged copy of the manifests and lockfiles
+        sp = (inv.get("target") or {}).get("scan_path")
+        self.scan_path = Path(sp) if sp and Path(sp).is_dir() else None
         self.excluded = (inv.get("scope") or {}).get("excluded_paths") or []
         self.offline = bool((inv.get("options") or {}).get("offline"))
         self.timeout = args.timeout
@@ -245,8 +251,14 @@ class Runner:
             return
         empty = self.raw / "osv-scanner-empty.toml"
         empty.write_text("", encoding="utf-8")
+        # Hard rule 0: scan the staged copy of manifests and lockfiles, never the project, and keep the
+        # "directory" plugins (vendored-code hashing, git commit lookups) off.
+        scan_path = self.scan_path
+        if scan_path is None:
+            self.status(name, "skipped", "no staged scan input (raw/scan-input/); rerun detect_inventory.py")
+            return
         args = ["scan", "source", "-r", "--format", "json", "--output-file", str(cli_out), "--config", str(empty),
-                "--no-call-analysis=all", "--allow-no-lockfiles", str(self.target)]
+                "--no-call-analysis=all", "--allow-no-lockfiles", "--x-disable-plugins=directory", str(scan_path)]
         why = {"not-configured": "no osv-scanner MCP server is configured, so the CLI ran instead (Step 4.1)",
                "failed": "the MCP scan failed, so the CLI ran instead (Step 4.1)",
                "skipped-go": "Go modules are present, so the CLI ran with --no-call-analysis=all instead of the MCP scan "
@@ -554,12 +566,15 @@ class Runner:
         exe = C.find_tool("trivy")
         if not self.gate(name, bool(self.manifests), exe):
             return
+        if self.scan_path is None:
+            self.status(name, "skipped", "no staged scan input (raw/scan-input/); rerun detect_inventory.py")
+            return
         st = self.status(name, "ran", None, version=self.version_of(exe))
         empty = self.work / "empty.trivyignore"
         empty.write_text("", encoding="utf-8")
         out_file = self.work / "trivy.json"
         args = ["fs", "--scanners", "vuln", "--format", "json", "--output", str(out_file), "--offline-scan",
-                "--ignorefile", str(empty), "--quiet", str(self.target)]
+                "--ignorefile", str(empty), "--quiet", str(self.scan_path)]
         try:
             r = self.run_tool(exe, args, cwd=self.work, timeout=max(self.timeout, 900))
         except ToolError as e:

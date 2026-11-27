@@ -705,10 +705,30 @@ class SupportChecker:
         if not version:
             return self.support_obj("unknown", "The runtime version could not be determined from the evidence."), details
         label = rt["name"]
+        api_note = ""
+        if rt.get("runtime") == "android":
+            # the version is a minSdk API level; endoflife.date gives each release its apiVersion ("34", "14-15")
+            cycles = self.eol_product(rt["endoflife_product"])
+            if isinstance(cycles, C.FetchError):
+                return self.support_obj("unknown", "endoflife.date lookup failed (%s)" % cycles.message), details
+            level = int(version.split(".")[0])
+            cyc = None
+            for c in cycles:
+                lo, _, hi = str(c.get("apiVersion") or "").partition("-")
+                if lo.isdigit() and int(lo) <= level <= int(hi if hi.isdigit() else lo):
+                    cyc = c
+                    break
+            if cyc is None:
+                return self.support_obj("unknown", "endoflife.date (android) lists no release with API level %s." % level), details
+            version = str(cyc["cycle"])
+            api_note = "minSdk %d: the app installs on devices down to Android %s (API %d). " % (level, version, level)
+            details["api_level"] = level
         result, note = self.eol_status(rt["endoflife_product"], version, label)
         if result is None:
             return self.support_obj("unknown", note), details
-        reason = result["reason"]
+        reason = api_note + result["reason"]
+        if api_note:
+            result["newer_major_available"] = None   # raising minSdk is a product decision, not an upgrade
         if rt.get("version_confidence") == "range" and any("declared" in e for e in rt.get("evidence") or []):
             reason = "Judged on the lowest version the declared range allows (%s). %s" % (version, reason)
         if rt.get("runtime") == "java" and rt.get("endoflife_product_from") != "image":

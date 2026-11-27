@@ -400,13 +400,16 @@ def mcp_parse_warning(data: dict):
             % (totals["vulnerabilities"], totals["packages"], n_ids, len(rows)))
 
 
-def rel_to_target(path: str, target: str) -> str:
+def rel_to_target(path: str, target) -> str:
+    """A scanner's path relative to the project. `target` is one root or a list of roots: the staged
+    raw/scan-input/ copy the scanners read (hard rule 0) and the project itself."""
     p = (path or "").strip().replace("\\", "/")
-    t = (target or "").replace("\\", "/").rstrip("/")
-    if t and p.lower() == t.lower():
-        return "."
-    if t and p.lower().startswith(t.lower() + "/"):
-        return p[len(t) + 1:]
+    for t in ([target] if isinstance(target, str) else list(target or [])):
+        t = (t or "").replace("\\", "/").rstrip("/")
+        if t and p.lower() == t.lower():
+            return "."
+        if t and p.lower().startswith(t.lower() + "/"):
+            return p[len(t) + 1:]
     return p[2:] if p.startswith("./") else p
 
 
@@ -529,7 +532,8 @@ class OsvQuery:
     def __init__(self, out: Path, inventory: dict):
         self.raw = C.raw_dir(out)
         self.inv = inventory
-        self.target = (inventory.get("target") or {}).get("path") or ""
+        tgt = inventory.get("target") or {}
+        self.target = [p for p in (tgt.get("scan_path"), tgt.get("path")) if p]
         self.excluded = (inventory.get("scope") or {}).get("excluded_paths") or []
         self.records: dict[str, dict | None] = {}
         self.lock = threading.Lock()

@@ -240,6 +240,8 @@ class Inventory:
         self.osv_configs: list[dict] = []
         self.go_modules: list[str] = []
         self.maven_private: list[str] = []
+        self.gradle_plugins_seen: set[tuple] = set()  # (artifact, version) already recorded
+        self.gradle_builds: list[dict] = []           # builds without gradle.lockfile, for resolve_gradle()
         self.service_images: list[str] = []
         self.plain_requirements: list[str] = []
         self.maven_unknown_versions = 0
@@ -339,7 +341,7 @@ class Inventory:
         if rid == "java" and re.match(r"^1\.\d", v):
             v = v[2:]  # 1.8 -> 8
         parts = v.split(".")
-        if rid in ("nodejs", "java", "debian", "amazon-linux"):
+        if rid in ("nodejs", "java", "debian", "amazon-linux", "gradle", "android"):
             n = 2 if (rid == "nodejs" and parts[0] == "0") else 1
         elif rid == "dotnetfx":
             n = 3
@@ -440,6 +442,10 @@ class Inventory:
         except Exception as e:
             self.error(".", "vendored JS/CSS scan failed: %s" % e)
         self.apply_privacy()
+        try:
+            self.resolve_gradle()
+        except Exception as e:
+            self.error(".", "Gradle dependency resolution failed: %s: %s" % (type(e).__name__, e))
         self.frameworks = self.detect_frameworks()
 
     def rel(self, d, name):
@@ -1547,49 +1553,231 @@ class Inventory:
             self.gaps.append("Maven: transitive dependencies of pom.xml are not resolved by this skill; osv-scanner resolves them when it is allowed to run")
 
     # ------------------------------------------------------------------ Gradle
+    # Dependency configurations: the standard ones, any variant/flavor/source-set prefixed form
+    # (releaseImplementation, freeDebugApi, androidTestImplementation, kspAndroidTest, ...) and the
+    # Android-specific ones. `classpath` covers legacy buildscript { dependencies { ... } } plugins.
+    GRADLE_CONF = (r"\b((?:[a-z][A-Za-z0-9]*)?(?:Implementation|Api|CompileOnly|RuntimeOnly|AnnotationProcessor)"
+                   r"|implementation|api|compile|runtime|compileOnly|runtimeOnly|annotationProcessor"
+                   r"|testCompile|testCompileOnly|testRuntimeOnly|(?:kapt|ksp)(?:[A-Z][A-Za-z0-9]*)?"
+                   r"|developmentOnly|coreLibraryDesugaring|lintChecks|lintPublish|classpath)")
+    # Plugin id -> the Maven artifact that holds it, so the vulnerability and support checks look up
+    # a real library. Ids not listed here use the Gradle plugin marker artifact <id>:<id>.gradle.plugin.
+    GRADLE_PLUGIN_ARTIFACTS = [
+        (r"com\.android\.(application|library|test|dynamic-feature|asset-pack|kotlin\.multiplatform\.library)$", "com.android.tools.build:gradle"),
+        (r"org\.jetbrains\.kotlin\.plugin\.serialization$", "org.jetbrains.kotlin:kotlin-serialization"),
+        (r"org\.jetbrains\.kotlin\.plugin\.compose$", "org.jetbrains.kotlin:compose-compiler-gradle-plugin"),
+        (r"org\.jetbrains\.kotlin\..+", "org.jetbrains.kotlin:kotlin-gradle-plugin"),
+        (r"com\.google\.devtools\.ksp$", "com.google.devtools.ksp:symbol-processing-gradle-plugin"),
+        (r"com\.google\.gms\.google-services$", "com.google.gms:google-services"),
+        (r"com\.google\.firebase\.crashlytics$", "com.google.firebase:firebase-crashlytics-gradle"),
+        (r"com\.google\.dagger\.hilt\.android$", "com.google.dagger:hilt-android-gradle-plugin"),
+        (r"androidx\.navigation\.safeargs(\.kotlin)?$", "androidx.navigation:navigation-safe-args-gradle-plugin"),
+        (r"androidx\.room$", "androidx.room:room-gradle-plugin"),
+    ]
+
+    @staticmethod
+    def gradle_alias(accessor):
+        """Gradle treats -, _ and . in catalog aliases as the same separator."""
+        return re.sub(r"[-_.]", ".", accessor).lower()
+
+    @staticmethod
+    def gradle_blocks(text, name):
+        """The bodies of every `name { ... }` block, braces balanced."""
+        out = []
+        for m in re.finditer(r"\b%s\s*\{" % name, text):
+            depth, i = 1, m.end()
+            while i < len(text) and depth:
+                depth += {"{": 1, "}": -1}.get(text[i], 0)
+                i += 1
+            out.append(text[m.end():i - 1])
+        return out
+
+    def gradle_plugin_artifact(self, pid):
+        for pat, artifact in self.GRADLE_PLUGIN_ARTIFACTS:
+            if re.match(pat, pid):
+                return artifact
+        return "%s:%s.gradle.plugin" % (pid, pid)
+
+    def gradle_vars(self, d, catalog):
+        """Version variables a build file can use: gradle.properties (root, then the module's own),
+        ext/extra properties and local val/var/def strings in the root and module build files, and the
+        catalog's [versions] as libs.versions.<alias>. Later sources override earlier ones."""
+        out = {}
+        for rel in C.dedupe(["gradle.properties", self.rel(d, "gradle.properties")]):
+            if self.exists(rel):
+                for line in self.read(rel).splitlines():
+                    m = re.match(r"\s*([\w.\-]+)\s*[=:]\s*(\S.*?)\s*$", line)
+                    if m and not line.lstrip().startswith(("#", "!")):
+                        out[m.group(1)] = m.group(2)
+        files = []
+        for n in ("build.gradle", "build.gradle.kts"):
+            for rel in C.dedupe([n, self.rel(d, n)]):
+                if self.exists(rel) and rel not in files:
+                    files.append(rel)
+        q = r"['\"]([^'\"$]+)['\"]"
+        pats = [r"\bext\.(\w+)\s*=\s*" + q,                                  # ext.kotlin_version = '1.9.0'
+                r"\bextra\[\s*['\"](\w+)['\"]\s*\]\s*=\s*" + q,              # extra["x"] = "1"
+                r"\bset\(\s*['\"](\w+)['\"]\s*,\s*" + q + r"\s*\)",          # extra.set("x", "1")
+                r"\bva[lr]\s+(\w+)\s+by\s+extra\(\s*" + q + r"\s*\)",        # val x by extra("1")
+                r"\b(?:val|var|def|String)\s+(\w+)\s*(?::\s*String)?\s*=\s*" + q]
+        for rel in files:
+            text = self.read(rel, limit=1_000_000)
+            for block in self.gradle_blocks(text, "ext"):
+                for m in re.finditer(r"^\s*(?:set\(\s*['\"])?(\w+)['\"]?\s*(?:=|,)\s*" + q, block, re.M):
+                    out[m.group(1)] = m.group(2)
+            for p in pats:
+                for m in re.finditer(p, text):
+                    out[m.group(1)] = m.group(2)
+        for alias, v in catalog.get("versions", {}).items():
+            out["libs.versions." + alias] = v
+        return out
+
+    @staticmethod
+    def gradle_subst(value, variables):
+        """Fill $name, ${name}, ${rootProject.ext.name}, ${libs.versions.x.get()} and the like; None
+        when a reference stays unresolved."""
+        if value is None or "$" not in value:
+            return value
+
+        def look(name):
+            name = re.sub(r"^(?:rootProject\.|project\.)?(?:ext\.|extra\.|properties\.)?", "", name)
+            name = re.sub(r"^extra\[\s*['\"](\w+)['\"]\s*\]$", r"\1", name)
+            name = re.sub(r"\.get\(\)$", "", name)
+            if name.startswith("libs.versions."):
+                name = "libs.versions." + Inventory.gradle_alias(name[len("libs.versions."):])
+            return variables.get(name)
+
+        out = re.sub(r"\$\{([^}]+)\}|\$([A-Za-z_]\w*)", lambda m: look((m.group(1) or m.group(2)).strip()) or m.group(0), value)
+        return None if "$" in out else out
+
     def do_gradle(self, d, names):
         builds = [n for n in names if n in ("build.gradle", "build.gradle.kts")]
+        settings = [n for n in names if n in ("settings.gradle", "settings.gradle.kts")]
         lock = "gradle.lockfile" if "gradle.lockfile" in names else None
         if not builds and not lock:
             return
         ws = d or "."
-        catalog = {}
+        catalog = {"libraries": {}, "bundles": {}, "plugins": {}, "versions": {}}
         for cat_rel in (self.rel(d, "gradle/libs.versions.toml"), "gradle/libs.versions.toml"):
             if self.exists(cat_rel):
                 catalog = self.gradle_catalog(cat_rel)
                 break
+        variables = self.gradle_vars(d, catalog)
+
+        def sub(v):
+            return self.gradle_subst(v, variables)
+
+        wrapper = self.rel(d, "gradle/wrapper/gradle-wrapper.properties")
+        if self.exists(wrapper):
+            m = re.search(r"distributionUrl\s*=.*?gradle-(\d+(?:\.\d+)*(?:-[\w.]+)?)-(?:bin|all)\.zip", self.read(wrapper))
+            if m:
+                self.add_runtime("gradle", m.group(1), "exact", "%s (Gradle wrapper)" % wrapper)
         declared = {}
+        plugins = {}   # artifact -> (version, plugin id, file)
+        applied = set()  # plugin ids this module applies (not "apply false")
+        boms = []
         manifest = None
         boot = None
-        for b in builds:
+        android = False
+        conf_re = self.GRADLE_CONF
+        plat = r"\s*\(?\s*((?:enforced)?[pP]latform\s*\(?\s*)?"
+        ver_re = r"(?:\s*version\s*\(?\s*(?:['\"]([^'\"]+)['\"]|(libs\.versions\.[\w.]+?)(?:\.get\(\))?|([A-Za-z_]\w*))\s*\)?)?"
+        for b in settings + builds:
             rel = self.rel(d, b)
-            manifest = rel
             text = self.read(rel, limit=1_000_000)
-            self.note_manifest(rel, "Maven", "manifest")
-            self.scan_leads(rel, text)
-            m = re.search(r"id\s*\(?\s*['\"]org\.springframework\.boot['\"]\s*\)?\s*version\s*\(?\s*['\"]([^'\"]+)['\"]", text)
-            if m:
-                boot = m.group(1)
-            m = re.search(r"(?:languageVersion\s*(?:=|\.set\()\s*JavaLanguageVersion\.of\(\s*|sourceCompatibility\s*=\s*(?:JavaVersion\.VERSION_|['\"]?))(1[._]\d|\d+)", text)
-            if m:
-                self.add_runtime("java", m.group(1).replace("_", "."), "exact", "%s (toolchain)" % rel)
+            is_build = b in builds
+            if is_build:
+                manifest = rel
+                self.note_manifest(rel, "Maven", "manifest")
+                self.scan_leads(rel, text)
             for mm in re.finditer(r"maven\s*\{[^}]*?url\s*(?:=\s*)?(?:uri\s*\()?\s*['\"]([^'\"]+)['\"]", text, re.S):
                 h = host_of(mm.group(1))
                 if h and h not in PUBLIC_HOSTS["Maven"]:
                     self.add_private_registry("Maven", h, "%s (repositories)" % rel)
                     self.maven_private.append("%s: repository %s" % (rel, h))
-            conf_re = r"(implementation|api|compile|runtimeOnly|runtime|compileOnly|testImplementation|testRuntimeOnly|testCompile|testCompileOnly|annotationProcessor|kapt|ksp|developmentOnly|androidTestImplementation|debugImplementation)"
-            for mm in re.finditer(conf_re + r"\s*\(?\s*(?:platform\s*\(\s*|enforcedPlatform\s*\(\s*)?['\"]([^'\":]+):([^'\":]+)(?::([^'\"@:]+))?[^'\"]*['\"]", text):
-                declared["%s:%s" % (mm.group(2), mm.group(3))] = (mm.group(4), mm.group(1))
+            for block in self.gradle_blocks(text, "plugins"):
+                for mm in re.finditer(r"(?:\bid\s*\(?\s*['\"]([\w.\-]+)['\"]|\bkotlin\s*\(\s*['\"]([\w.\-]+)['\"])\s*\)?" + ver_re, block):
+                    pid = mm.group(1) or "org.jetbrains.kotlin." + mm.group(2)
+                    android = android or pid.startswith("com.android.")
+                    v = mm.group(3) or (("${%s}" % mm.group(4)) if mm.group(4) else None) or \
+                        (("${%s}" % mm.group(5)) if mm.group(5) and mm.group(5) not in ("apply", "false", "true") else None)
+                    v = sub(v)
+                    if is_build and not re.match(r"\s*\)?\s*apply\s*\(?\s*false", block[mm.end():]):
+                        applied.add(pid)
+                    if v:
+                        plugins[self.gradle_plugin_artifact(pid)] = (v, pid, rel)
+                for mm in re.finditer(r"\balias\s*\(?\s*libs\.plugins\.([\w.]+)", block):
+                    ent = catalog["plugins"].get(self.gradle_alias(mm.group(1)))
+                    if ent:
+                        android = android or ent[0].startswith("com.android.")
+                        if is_build and not re.match(r"[\w.]*\s*\)?\s*apply\s*\(?\s*false", block[mm.end():]):
+                            applied.add(ent[0])
+                        if ent[1]:
+                            plugins[self.gradle_plugin_artifact(ent[0])] = (ent[1], ent[0], rel)
+            if not is_build:
+                continue
+            # fill ${...} templates first: one like ${rootProject.extra["v"]} holds quotes of its own
+            text = re.sub(r"\$\{[^{}\n]+\}", lambda m: sub(m.group(0)) or m.group(0), text)
+            android = android or bool(re.search(r"apply\s+plugin\s*:\s*['\"]com\.android\.", text))
+            for mm in re.finditer(r"apply\s*\(?\s*plugin\s*[:=]\s*['\"]([\w.\-]+)['\"]", text):   # legacy plugin application
+                legacy = {"kotlin-android": "org.jetbrains.kotlin.android", "kotlin": "org.jetbrains.kotlin.jvm",
+                          "kotlin-multiplatform": "org.jetbrains.kotlin.multiplatform"}
+                applied.add(legacy.get(mm.group(1), mm.group(1)))
+            # kotlin("test") / kotlin("reflect", "1.9.0"): org.jetbrains.kotlin:kotlin-<name>, versioned by the plugin
+            for mm in re.finditer(conf_re + r"\s*\(?\s*kotlin\(\s*['\"]([\w\-]+)['\"]\s*(?:,\s*['\"]([^'\"]+)['\"])?\s*\)", text):
+                declared["org.jetbrains.kotlin:kotlin-%s" % mm.group(2)] = (sub(mm.group(3)) or "$kotlin-plugin", mm.group(1))
+            m = re.search(r"id\s*\(?\s*['\"]org\.springframework\.boot['\"]\s*\)?\s*version\s*\(?\s*['\"]([^'\"]+)['\"]", text)
+            if m:
+                boot = m.group(1)
+            # The JDK: a toolchain names the JDK the build runs on. sourceCompatibility and jvmTarget only
+            # set the bytecode level; on Android that is not a JVM the app runs on, so it is not recorded.
+            m = re.search(r"(?:languageVersion\s*(?:=|\.set\()\s*JavaLanguageVersion\.of\(\s*|jvmToolchain\s*\(\s*)(\d+)", text)
+            if m:
+                self.add_runtime("java", m.group(1), "exact", "%s (JDK toolchain)" % rel)
+            elif "android {" not in text and not android:
+                m = re.search(r"sourceCompatibility\s*=\s*(?:JavaVersion\.VERSION_|['\"]?)(1[._]\d|\d+)", text)
+                if m:
+                    self.add_runtime("java", m.group(1).replace("_", "."), "exact", "%s (toolchain)" % rel)
+            if "android {" in text or re.search(r"\bandroid\s*\{", text):
+                android = True
+                levels = {}
+                for key in ("minSdk", "targetSdk", "compileSdk"):
+                    mm = re.search(r"\b%s(?:Version)?\s*(?:=\s*|\(\s*|\s+)(?:(\d+)|libs\.versions\.([\w.]+?)(?:\.get\(\))?(?:\.toInt\(\))?\b|([A-Za-z_]\w*))" % key, text)
+                    if not mm:
+                        continue
+                    val = mm.group(1) or (variables.get("libs.versions." + self.gradle_alias(mm.group(2))) if mm.group(2) else None) \
+                        or (variables.get(mm.group(3)) if mm.group(3) else None)
+                    if val and str(val).strip().isdigit():
+                        levels[key] = str(val).strip()
+                if levels.get("minSdk"):
+                    others = ", ".join("%s %s" % (k, levels[k]) for k in ("targetSdk", "compileSdk") if k in levels)
+                    self.add_runtime("android", levels["minSdk"], "exact",
+                                     "%s (minSdk %s%s)" % (rel, levels["minSdk"], ("; " + others) if others else ""))
+            for mm in re.finditer(conf_re + plat + r"['\"]([^'\":]+):([^'\":]+)(?::([^'\"@:]+))?[^'\"]*['\"]", text):
+                key = "%s:%s" % (mm.group(3), mm.group(4))
+                declared[key] = (sub(mm.group(5)), mm.group(1))
+                if mm.group(2):
+                    boms.append(key)
             for mm in re.finditer(conf_re + r"\s*\(?\s*group\s*[:=]\s*['\"]([^'\"]+)['\"]\s*,\s*name\s*[:=]\s*['\"]([^'\"]+)['\"](?:\s*,\s*version\s*[:=]\s*['\"]([^'\"]+)['\"])?", text):
-                declared["%s:%s" % (mm.group(2), mm.group(3))] = (mm.group(4), mm.group(1))
-            for mm in re.finditer(conf_re + r"\s*\(?\s*libs\.([\w.]+)", text):
-                alias = mm.group(2).replace(".", "-")
-                ent = catalog.get(alias) or catalog.get(mm.group(2).replace(".", "_"))
-                if ent:
-                    declared[ent[0]] = (ent[1], mm.group(1))
+                declared["%s:%s" % (mm.group(2), mm.group(3))] = (sub(mm.group(4)), mm.group(1))
+            for mm in re.finditer(conf_re + plat + r"libs\.([\w.]+)", text):
+                accessor = self.gradle_alias(mm.group(3))
+                if accessor.startswith("bundles."):
+                    aliases = catalog["bundles"].get(accessor[len("bundles."):], [])
+                else:
+                    aliases = [accessor]
+                for alias in aliases:
+                    ent = catalog["libraries"].get(alias)
+                    if ent:
+                        declared[ent[0]] = (ent[1], mm.group(1))
+                        if mm.group(2):
+                            boms.append(ent[0])
+        kotlin_plugin_v = plugins.get("org.jetbrains.kotlin:kotlin-gradle-plugin", (None,))[0] or \
+            next((r["version"] for r in self.runtimes.values() if r["runtime"] == "kotlin" and r["version"]), None)
         for key, (v, conf_name) in list(declared.items()):
-            if v and "$" in v:
+            if v == "$kotlin-plugin":
+                declared[key] = (kotlin_plugin_v, conf_name)
+            elif v and "$" in v:
                 declared[key] = (None, conf_name)
             elif not v and boot and key.startswith("org.springframework.boot:"):
                 declared[key] = (boot, conf_name)
@@ -1598,12 +1786,32 @@ class Inventory:
             c = conf_name.lower()
             if "test" in c:
                 return "dev"
-            if c in ("compileonly", "annotationprocessor", "kapt", "ksp", "developmentonly") or "annotationprocessor" in c:
+            if (c.endswith(("compileonly", "annotationprocessor")) or c.startswith(("kapt", "ksp"))
+                    or c in ("developmentonly", "lintchecks", "lintpublish", "classpath")):
                 return "build"
             return "runtime"
 
         if boot and not any(k.startswith("org.springframework.boot:") for k in declared):
             declared["org.springframework.boot:spring-boot"] = (boot, "implementation")
+        # Kotlin: the Kotlin Gradle plugin's version is the Kotlin version the build compiles with.
+        for artifact, (v, pid, rel) in plugins.items():
+            if pid.startswith("org.jetbrains.kotlin.") and artifact == "org.jetbrains.kotlin:kotlin-gradle-plugin":
+                self.add_runtime("kotlin", v, C.classify_declared(v, "Maven")[1], "%s (plugin %s)" % (rel, pid))
+        for key, (v, conf_name) in declared.items():
+            if key in ("org.jetbrains.kotlin:kotlin-gradle-plugin", "org.jetbrains.kotlin:kotlin-stdlib") and v:
+                self.add_runtime("kotlin", v, C.classify_declared(v, "Maven")[1], "%s (%s)" % (manifest, key))
+        # Plugins are build tooling and are not in gradle.lockfile, so they are always recorded from
+        # their declared versions. The Spring Boot plugin is already covered above. A plugin declared
+        # in the root project and applied again in each module is recorded once.
+        seen = self.gradle_plugins_seen
+        for artifact, (v, pid, rel) in plugins.items():
+            if pid == "org.springframework.boot" or artifact in declared or (artifact, v) in seen:
+                continue
+            seen.add((artifact, v))
+            version, conf, low = C.classify_declared(v, "Maven")
+            self.add_lib(ecosystem="Maven", name=artifact, version=version, confidence=conf, direct=True,
+                         scope="build", manifest=rel, declared=v, workspace=ws, lowest=low,
+                         lookup_note="Gradle plugin %s" % pid)
         if lock:
             lock_rel = self.rel(d, lock)
             self.note_manifest(lock_rel, "Maven", "lockfile")
@@ -1626,36 +1834,84 @@ class Inventory:
                 self.add_lib(ecosystem="Maven", name=key, version=v, confidence="exact", direct=key in declared,
                              scope=scope, manifest=manifest, lockfile=lock_rel, workspace=ws)
             return
+        entries = []
         for key, (v, conf_name) in declared.items():
             # spec §9: declared versions, "range" unless they're exact
             version, conf, low = C.classify_declared(v, "Maven") if v else (None, "unknown", None)
-            self.add_lib(ecosystem="Maven", name=key, version=version, confidence=conf, direct=True,
-                         scope=gscope(conf_name), manifest=manifest, declared=v, workspace=ws, lowest=low)
+            note = None
+            if not v and boms and key not in boms:
+                note = "version managed by BOM %s (not resolved)" % ", ".join(sorted(set(boms)))
+            lib = self.add_lib(ecosystem="Maven", name=key, version=version, confidence=conf, direct=True,
+                               scope=gscope(conf_name), manifest=manifest, declared=v, workspace=ws, lowest=low,
+                               lookup_note=note)
+            if lib is not None:
+                entries.append((lib, key, v, key in boms))
+        # The Kotlin plugin adds kotlin-stdlib at its own version unless kotlin.stdlib.default.dependency=false.
+        implicit = []
+        kotlin_applied = any(re.match(r"org\.jetbrains\.kotlin\.(android|jvm|multiplatform)$", p) for p in applied)
+        if kotlin_applied and str(variables.get("kotlin.stdlib.default.dependency", "true")).strip().lower() != "false":
+            kv = plugins.get("org.jetbrains.kotlin:kotlin-gradle-plugin", (None,))[0]
+            if not kv:
+                known = [r["version"] for r in self.runtimes.values() if r["runtime"] == "kotlin" and r["version"]]
+                kv = max(known, key=C.version_sort_key) if known else None
+            if kv:
+                implicit.append(("org.jetbrains.kotlin:kotlin-stdlib", kv))
+        align = []
+        if kotlin_applied and implicit and \
+                str(variables.get("kotlin.stdlib.jdk.variants.version.alignment", "true")).strip().lower() != "false":
+            align = [("org.jetbrains.kotlin:kotlin-stdlib-jdk7", implicit[0][1]), ("org.jetbrains.kotlin:kotlin-stdlib-jdk8", implicit[0][1])]
         if builds and declared:
-            self.gaps.append("%s: no gradle.lockfile; declared versions only, transitive dependencies not resolved" % manifest)
+            # resolve_gradle() replaces this gap when it resolves the build online
+            gap = "%s: no gradle.lockfile; declared versions only, transitive dependencies not resolved" % manifest
+            self.gaps.append(gap)
+            self.gradle_builds.append({"manifest": manifest, "workspace": ws, "entries": entries, "gap": gap,
+                                       "implicit": implicit, "align": align})
 
     def gradle_catalog(self, rel):
+        """libs.versions.toml as {"libraries": {alias: (module, version)}, "bundles": {alias: [library
+        aliases]}, "plugins": {alias: (plugin id, version)}, "versions": {alias: version}}, aliases
+        normalised by gradle_alias."""
+        out = {"libraries": {}, "bundles": {}, "plugins": {}, "versions": {}}
         try:
             data = tomllib.loads(self.read(rel))
         except tomllib.TOMLDecodeError as e:
             self.error(rel, "invalid TOML (%s)" % e)
-            return {}
+            return out
         versions = data.get("versions") or {}
-        out = {}
-        for alias, spec in (data.get("libraries") or {}).items():
-            if isinstance(spec, str):
-                parts = spec.split(":")
-                if len(parts) >= 2:
-                    out[alias] = ("%s:%s" % (parts[0], parts[1]), parts[2] if len(parts) > 2 else None)
-                continue
-            module = spec.get("module") or ("%s:%s" % (spec.get("group"), spec.get("name")) if spec.get("group") else None)
-            v = spec.get("version")
+
+        def version_of(v):
             if isinstance(v, dict):
                 v = versions.get(v.get("ref")) if v.get("ref") else (v.get("strictly") or v.get("require") or v.get("prefer"))
             if isinstance(v, dict):
                 v = v.get("strictly") or v.get("require") or v.get("prefer")
+            return v if isinstance(v, str) else None
+
+        for alias, spec in (data.get("libraries") or {}).items():
+            alias = self.gradle_alias(alias)
+            if isinstance(spec, str):
+                parts = spec.split(":")
+                if len(parts) >= 2:
+                    out["libraries"][alias] = ("%s:%s" % (parts[0], parts[1]), parts[2] if len(parts) > 2 else None)
+                continue
+            if not isinstance(spec, dict):
+                continue
+            module = spec.get("module") or ("%s:%s" % (spec.get("group"), spec.get("name")) if spec.get("group") else None)
             if module:
-                out[alias] = (module, v)
+                out["libraries"][alias] = (module, version_of(spec.get("version")))
+        for alias, v in versions.items():
+            v = version_of(v) if isinstance(v, dict) else v
+            if isinstance(v, str):
+                out["versions"][self.gradle_alias(alias)] = v
+        for alias, members in (data.get("bundles") or {}).items():
+            if isinstance(members, list):
+                out["bundles"][self.gradle_alias(alias)] = [self.gradle_alias(m) for m in members if isinstance(m, str)]
+        for alias, spec in (data.get("plugins") or {}).items():
+            alias = self.gradle_alias(alias)
+            if isinstance(spec, str):
+                pid, _, v = spec.partition(":")
+                out["plugins"][alias] = (pid, v or None)
+            elif isinstance(spec, dict) and spec.get("id"):
+                out["plugins"][alias] = (spec["id"], version_of(spec.get("version")))
         return out
 
     # ------------------------------------------------------------------ Go
@@ -2836,6 +3092,99 @@ class Inventory:
                 self.note_manifest(rel, "npm", "vendored")
 
     # ------------------------------------------------------------------ privacy and frameworks
+    def resolve_gradle(self):
+        """Transitive dependencies of the Gradle builds without gradle.lockfile, from published metadata
+        (gradle_resolve.py). Skipped offline, with --no-transitive, and whenever a private Maven repository
+        or mirror is configured: the names in such a build may be internal (hard rule 5)."""
+        if not self.gradle_builds:
+            return
+        own_gaps = {b["gap"] for b in self.gradle_builds}
+
+        def skip(why):
+            self.gaps = [("%s (online resolution skipped: %s)" % (g, why)) if g in own_gaps else g for g in self.gaps]
+
+        if self.opts.offline:
+            return skip("offline")
+        if self.opts.no_transitive:
+            return skip("--no-transitive")
+        if self.maven_private:
+            return skip("a private Maven repository or mirror is configured, so no names are sent to public repositories")
+        import gradle_resolve as GR
+        from check_support import Net
+        internal = [p.lower() for p in self.opts.internal or []]
+
+        def is_private(ga):
+            return any(fnmatch.fnmatch(ga.lower(), p) for p in internal)
+
+        if not C.host_reachable(GR.CENTRAL + "/")[0]:
+            return skip("Maven Central unreachable")
+        res = GR.Resolver(Net(), is_private=is_private)
+        resolved_gaps = {}
+        for b in self.gradle_builds:
+            entries = [e for e in b["entries"] if not e[0].get("private")]
+            platforms = [(key, lib["version"]) for lib, key, _v, is_bom in entries
+                         if is_bom and lib["version_confidence"] == "exact"]
+            by_scope = {"runtime": [], "dev": []}
+            for lib, key, v, is_bom in entries:
+                if not is_bom and lib["scope"] in by_scope:
+                    by_scope[lib["scope"]].append((key, lib["version"] if lib["version_confidence"] == "exact" else v, False))
+            implicit = {ga: v for ga, v in b.get("implicit") or [] if ga not in {k for _l, k, _v, _b in entries}}
+            by_scope["runtime"].extend((ga, v, False) for ga, v in implicit.items())
+            # the runtime classpath, then the test classpath (which also sees the runtime dependencies)
+            align = b.get("align") or []
+            graphs = {"runtime": res.resolve(by_scope["runtime"], platforms, align) if by_scope["runtime"] else None,
+                      "dev": res.resolve(by_scope["runtime"] + by_scope["dev"], platforms, align) if by_scope["dev"] else None}
+            direct = {key: lib for lib, key, _v, _b in entries}
+            added, unresolved = 0, {}
+            for scope in ("runtime", "dev"):
+                g = graphs[scope]
+                if not g:
+                    continue
+                unresolved.update(g["unresolved"])
+                for ga, ver in g["selected"].items():
+                    if ga in direct:
+                        if scope == "runtime" or direct[ga]["scope"] == "dev":
+                            self._gradle_set_version(direct[ga], ver)
+                        continue
+                    if scope == "dev" and graphs["runtime"] and ga in graphs["runtime"]["selected"]:
+                        continue
+                    path = g["paths"].get(ga) or []
+                    if ga in implicit or (path and path[0] in implicit):
+                        path = ["org.jetbrains.kotlin:kotlin-gradle-plugin"] + path   # added by the Kotlin plugin
+                    self.add_lib(ecosystem="Maven", name=ga, version=ver, confidence="exact", direct=False, scope=scope,
+                                 manifest=b["manifest"], introduced_by=path, workspace=b["workspace"],
+                                 lookup_note="resolved from published POM/Gradle module metadata, not from a lockfile")
+                    added += 1
+            gap = ("%s: no gradle.lockfile; %d transitive dependencies resolved from published POM and Gradle module metadata "
+                   "on Maven Central and Google Maven (an approximation of Gradle's resolution; annotation processors, lint "
+                   "checks and plugins are not expanded; a gradle.lockfile gives exact versions)" % (b["manifest"], added))
+            if unresolved:
+                items = sorted(unresolved.items())
+                gap += "; not resolved: %s%s" % (", ".join("%s (%s)" % kv for kv in items[:8]),
+                                                 " and %d more" % (len(items) - 8) if len(items) > 8 else "")
+            resolved_gaps[b["gap"]] = gap
+        self.gaps = [resolved_gaps.get(g, g) for g in self.gaps]
+        self.errors.extend(e for e in res.net.errors if e not in self.errors)
+
+    def _gradle_set_version(self, lib, version):
+        """A direct Gradle dependency whose version the resolution settled (a BOM-managed one, a range, or
+        one raised by conflict resolution)."""
+        if lib.get("version") == version and lib.get("version_confidence") == "exact":
+            return
+        old_key = (lib.get("manifest") or lib.get("lockfile"), lib["id"])
+        before = lib.get("declared")
+        lib["version"], lib["version_confidence"], lib["lowest_version"] = version, "exact", None
+        lib["id"] = C.make_purl(lib["ecosystem"], lib["name"], version)
+        if before and before != version and (before.endswith("+") or before.startswith(("[", "(", "latest."))):
+            lib["lookup_note"] = "declared %s; resolves to %s, the newest matching version published (from published metadata)" % (before, version)
+        elif before and before != version:
+            lib["lookup_note"] = "declared %s; Gradle's conflict resolution selects %s (resolved from published metadata)" % (before, version)
+        else:
+            lib["lookup_note"] = "version %s set by a platform/BOM (resolved from published metadata)" % version
+        if self.lib_index.get(old_key) is lib:
+            del self.lib_index[old_key]
+        self.lib_index[(old_key[0], lib["id"])] = lib
+
     def apply_privacy(self):
         internal = [p.lower() for p in self.opts.internal or []]
         mirror_public = bool(self.opts.mirror_public)
@@ -2966,7 +3315,39 @@ class Inventory:
 RUN_FILES = ("osv-mcp-scan.txt", "osv-mcp-matches.json", "osv-cli.json", "osv-cli.stderr.txt", "osv-scanner-empty.toml",
              "scanners.json", "scanner-results.json", "support.json", "advisories.json", "findings-draft.json",
              "triage.json", "gopls-vulncheck.txt")
-RUN_DIRS = ("osv", "eol", "policies", "scanners")
+RUN_DIRS = ("osv", "eol", "policies", "scanners", "scan-input")
+
+
+# Manifests that are code (build scripts and DSL files) are never staged (hard rule 0); the scanners read
+# the lockfiles next to them instead.
+NOT_STAGED = re.compile(r"(^|/)(build\.gradle(\.kts)?|settings\.gradle(\.kts)?|conanfile\.py|setup\.py|Gemfile|Podfile|"
+                        r"Package\.swift|mix\.exs|build\.sbt|project\.clj|rebar\.config|[^/]*\.(py|js|mjs|cjs|ts|html?|rb|kts|gradle))$")
+
+
+def stage_scan_input(root: Path, raw: Path, paths) -> tuple[str, list[str]]:
+    """Copy the manifests and lockfiles, and nothing else, to raw/scan-input/ at their relative paths.
+    The osv-scanner CLI and MCP scan are pointed at this folder instead of the project (hard rule 0):
+    a scanner that never sees a source file can't send anything derived from one."""
+    stage = raw / "scan-input"
+    if stage.is_dir() and not stage.is_symlink():
+        shutil.rmtree(stage)
+    stage.mkdir(parents=True, exist_ok=True)
+    root_res = root.resolve()
+    staged = []
+    for rel in sorted(set(paths)):
+        if NOT_STAGED.search(rel) or rel.startswith("/") or ".." in rel.split("/"):
+            continue
+        src = root / rel
+        try:
+            if src.is_symlink() or not src.is_file() or not src.resolve().is_relative_to(root_res):
+                continue
+            dst = stage / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, dst)
+            staged.append(rel)
+        except OSError:
+            continue
+    return C.posix(stage.resolve()), staged
 
 
 def clear_previous_run(raw: Path) -> list[str]:
@@ -3005,6 +3386,11 @@ def main(argv=None):
     inv = Inventory(root, args)
     inv.run()
     data = inv.to_json(started)
+    # only package manifests and lockfiles: not vendored copies, not Dockerfiles, not content files
+    data["target"]["scan_path"], data["scope"]["scan_input_files"] = stage_scan_input(
+        root, C.raw_dir(args.out),
+        [m["path"] for m in data["manifests"] if m["kind"] in ("manifest", "lockfile") and m["ecosystem"] != "Containers"]
+        + [f for fs in inv.unsupported.values() for f in fs])
     out = C.raw_dir(args.out) / "inventory.json"
     C.write_json(out, data)
     if removed:

@@ -194,6 +194,10 @@
   category: web-fullstack
   packages: { maven: ["org.grails:grails-core"] }
   signals: [grails-app]
+- framework: Android
+  category: mobile
+  packages: { maven: ["com.android.tools.build:gradle"] }
+  signals: ["**/AndroidManifest.xml"]
 - framework: Hibernate ORM
   category: orm
   packages: { maven: ["org.hibernate:hibernate-core", "org.hibernate.orm:hibernate-core"] }

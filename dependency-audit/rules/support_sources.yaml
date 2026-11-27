@@ -35,6 +35,17 @@ runtimes:
       - { image: azul/zulu-openjdk, endoflife_product: azul-zulu }
       - { image: mcr.microsoft.com/openjdk/jdk, endoflife_product: microsoft-build-of-openjdk }
       - { image: openjdk, endoflife_product: openjdk-builds-from-oracle }
+  - runtime: Gradle
+    id: gradle
+    endoflife_product: gradle          # from gradle/wrapper/gradle-wrapper.properties; cycles are majors
+  - runtime: Kotlin
+    id: kotlin
+    endoflife_product: kotlin          # from the Kotlin Gradle plugin or kotlin-stdlib version
+  - runtime: Android
+    id: android
+    # The version is a module's minSdk API level. check_support.py maps it to an Android release
+    # through the apiVersion field of the fetched endoflife.date data, so no table is kept here.
+    endoflife_product: android
   - runtime: .NET Framework
     id: dotnetfx
     endoflife_product: dotnetfx        # cycles "4.5.2", "4.6", "4.6.1", "4.6.2", "4.7", ..., "4.8.1"
