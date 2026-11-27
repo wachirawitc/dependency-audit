@@ -1598,12 +1598,25 @@ class Inventory:
                 return artifact
         return "%s:%s.gradle.plugin" % (pid, pid)
 
+    def gradle_root(self, d):
+        """The Gradle root project of the module in d: the nearest directory at or above d holding
+        settings.gradle(.kts). The version catalog, root gradle.properties and root build file live
+        there, which need not be the scan root (e.g. an Android build under src/). Falls back to the
+        scan root when no settings file is found."""
+        parts = d.split("/") if d else []
+        for i in range(len(parts), -1, -1):
+            cand = "/".join(parts[:i])
+            if any(self.exists(self.rel(cand, n)) for n in ("settings.gradle", "settings.gradle.kts")):
+                return cand
+        return ""
+
     def gradle_vars(self, d, catalog):
         """Version variables a build file can use: gradle.properties (root, then the module's own),
         ext/extra properties and local val/var/def strings in the root and module build files, and the
         catalog's [versions] as libs.versions.<alias>. Later sources override earlier ones."""
         out = {}
-        for rel in C.dedupe(["gradle.properties", self.rel(d, "gradle.properties")]):
+        root = self.gradle_root(d)
+        for rel in C.dedupe([self.rel(root, "gradle.properties"), self.rel(d, "gradle.properties")]):
             if self.exists(rel):
                 for line in self.read(rel).splitlines():
                     m = re.match(r"\s*([\w.\-]+)\s*[=:]\s*(\S.*?)\s*$", line)
@@ -1611,7 +1624,7 @@ class Inventory:
                         out[m.group(1)] = m.group(2)
         files = []
         for n in ("build.gradle", "build.gradle.kts"):
-            for rel in C.dedupe([n, self.rel(d, n)]):
+            for rel in C.dedupe([self.rel(root, n), self.rel(d, n)]):
                 if self.exists(rel) and rel not in files:
                     files.append(rel)
         q = r"['\"]([^'\"$]+)['\"]"
@@ -1658,7 +1671,8 @@ class Inventory:
             return
         ws = d or "."
         catalog = {"libraries": {}, "bundles": {}, "plugins": {}, "versions": {}}
-        for cat_rel in (self.rel(d, "gradle/libs.versions.toml"), "gradle/libs.versions.toml"):
+        root = self.gradle_root(d)
+        for cat_rel in C.dedupe([self.rel(d, "gradle/libs.versions.toml"), self.rel(root, "gradle/libs.versions.toml")]):
             if self.exists(cat_rel):
                 catalog = self.gradle_catalog(cat_rel)
                 break
