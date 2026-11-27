@@ -24,7 +24,7 @@ Scripts produce the facts; the agent supplies the judgment.
 
 | Step | Script | What it does |
 |---|---|---|
-| 1. Inventory | `detect_inventory.py` | Parses manifests and lockfiles (npm, PyPI, Maven/Gradle, Go, Cargo, RubyGems, Packagist, NuGet, Pub, CocoaPods/SwiftPM, container base images, vendored JS/CSS) |
+| 1. Inventory | `detect_inventory.py` | Parses manifests and lockfiles (npm, PyPI, Maven/Gradle including Android and Kotlin, Go, Cargo, RubyGems, Packagist, NuGet, Pub, CocoaPods/SwiftPM, container base images, vendored JS/CSS). Gradle builds without a `gradle.lockfile` get their transitive dependencies resolved from published Maven metadata |
 | 2. Support status | `check_support.py` | End-of-life, deprecation and maintenance status from endoflife.date and the package registries |
 | 3. Vulnerabilities | `run_scanners.py`, `query_osv.py` | osv-scanner (MCP server or CLI) and other installed scanners; every advisory confirmed against OSV.dev |
 | 4. Draft | `build_report.py draft` | Drafts findings with IDs and triage hints |
@@ -33,6 +33,11 @@ Scripts produce the facts; the agent supplies the judgment.
 
 Key guarantees (full list in [`dependency-audit/SKILL.md`](dependency-audit/SKILL.md)):
 
+- **The skill never uploads source code.** Its scripts, scanners and tool calls send no file
+  content, excerpt or hash from the audited repository anywhere: osv-scanner and trivy read only a
+  staged copy of the manifests and lockfiles (`raw/scan-input/`), never the project, and the reports
+  stay on local disk. The one exception is inherent to any agent: files the agent reads during
+  triage (to check reachability) are part of its session with the model provider.
 - Advisory IDs and EOL dates come only from sources fetched during the run, never from the model's memory.
 - Private or internal package names are never sent to public services.
 - The project is never modified, built or executed, and no `osv-scanner.toml` is written.
@@ -61,20 +66,24 @@ Notes:
 - Registering the MCP server automatically needs the `claude` CLI. With another agent, register
   `<absolute path to osv-scanner> experimental-mcp` as an MCP server named `osv-scanner` yourself.
 
-**Network.** Only public package names and versions are sent, over HTTPS, to:
+**Network.** Only public package names and versions are sent, over HTTPS, never source code, to:
 
 - `api.osv.dev` (advisories) and `endoflife.date` (runtime and framework end-of-life dates)
 - `api.github.com` and `gitlab.com` (archived flag and last release, for the unmaintained check)
 - the registry of each ecosystem the project uses: `registry.npmjs.org`, `pypi.org`, `repo1.maven.org`,
   `dl.google.com`, `api.deps.dev` (Maven), `proxy.golang.org`, `crates.io`, `index.crates.io`, `rubygems.org`,
   `repo.packagist.org`, `api.nuget.org`, `pub.dev`, `trunk.cocoapods.org`
+- for Gradle builds without a lockfile (Android included), `repo1.maven.org` and `dl.google.com`
+  again, during the inventory step, to read the published POM and Gradle module metadata; skipped
+  offline, with `--no-transitive`, and when a private Maven repository is configured
 - the support-policy pages listed in [`dependency-audit/rules/support_sources.yaml`](dependency-audit/rules/support_sources.yaml)
 
 With no network, use `--offline`: support statuses become `unknown` and no advisory IDs are reported.
 
-**Optional scanners.** When installed, these also run, read-only and from a scratch folder, never from the
-project: `npm audit`, `pip-audit`, `cargo audit`, `bundle-audit`, `composer audit`,
-`dotnet list package --vulnerable` and `trivy`. Setup reports them but never installs them. Scanners
+**Optional scanners.** When installed, these also run, read-only, each with a scratch folder as its working
+directory so repository config can't steer it: `npm audit`, `pip-audit`, `cargo audit`, `bundle-audit`,
+`composer audit`, `dotnet list package --vulnerable` and `trivy`. trivy, like osv-scanner, reads only
+`raw/scan-input/`, a copy of the manifests and lockfiles. Setup reports them but never installs them. Scanners
 that would send package names to a public service are skipped when the project has private packages.
 `govulncheck` and `gopls` are never used, because they load Go packages and may download modules.
 
@@ -114,7 +123,8 @@ Outputs, in `--out`:
 - `dependency-report.json`: machine-readable, validated against
   [`schema/report.schema.json`](dependency-audit/schema/report.schema.json).
 - `dependency-report.html`: a self-contained page for people, rendered from the JSON.
-- `raw/`: the evidence behind every finding (inventory, OSV records, scanner output, triage).
+- `raw/`: the evidence behind every finding (inventory, OSV records, scanner output, triage), and
+  `raw/scan-input/`, the copy of the manifests and lockfiles the scanners read.
 
 To re-render a report's HTML by hand (writes `dependency-report.html` next to the JSON, replacing it):
 
@@ -130,7 +140,8 @@ dependency-audit/              the skill
 ├── references/                setup procedure and triage.json format
 ├── rules/                     framework mapping, support sources, setup requirements (data)
 ├── schema/report.schema.json  report format
-├── scripts/                   the workflow steps, plus setup_check.py and install_release.py
+├── scripts/                   the workflow steps, plus setup_check.py, install_release.py and
+│                              gradle_resolve.py (Gradle resolution, used by detect_inventory.py)
 └── templates/                 HTML report template
 dependency-audit-workspace/    skill evaluation
 ├── evals/evals.json           eval prompts and expected outcomes
