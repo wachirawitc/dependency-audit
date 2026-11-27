@@ -143,14 +143,9 @@ dependency-audit/              the skill
 ├── scripts/                   the workflow steps, plus setup_check.py, install_release.py and
 │                              gradle_resolve.py (Gradle resolution, used by detect_inventory.py)
 └── templates/                 HTML report template
-dependency-audit-workspace/    skill evaluation
-├── evals/evals.json           eval prompts and expected outcomes
-└── fixtures/                  sample projects (Node, .NET, Java, Go/Python/pnpm monorepo)
 samples/                       example JSON and HTML reports
 SKILL_DESIGN.md                design spec, edge cases and open questions
 ```
-
-Eval run outputs (`dependency-audit-workspace/iteration-*/`) are generated and git-ignored.
 
 ## Further reading
 
