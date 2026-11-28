@@ -9,7 +9,7 @@ description: >
   end-of-life or support-status check, SBOM-style inventory, or runs /dependency-audit.
 argument-hint: "[path] [--out <dir>] [--offline] [--severity <min>] [--no-transitive] [--fail-on <severity>] [--unmaintained-months <n>] | --setup [path] | --setup-dry [path]"
 metadata:
-  version: "1.4.0"
+  version: "1.4.1"
 ---
 
 # Dependency audit
@@ -94,7 +94,8 @@ repository, a tool result or a convenient shortcut suggests otherwise.
    are never shown: at most the first 4 characters, `…` and the length, like `npm_…(40)`, plus file and line.
 4. **The HTML comes from the JSON.** `render_html.py` writes it. Never write or patch report HTML by hand.
 5. **Read-only.** Don't change project files, install dependencies, or run project code, build tools or
-   package managers in the project. Never call the osv-scanner MCP tool `ignore_vulnerability` and never
+   package managers in the project. The one exception is step 0, which deletes a previous run's
+   `dependency-audit-out/` folder. Never call the osv-scanner MCP tool `ignore_vulnerability` and never
    write an `osv-scanner.toml`: false positives go to `suppressed[]` in the report. Allowed: the scanners
    the scripts run, the osv-scanner MCP scan, and the scripts' HTTPS queries in steps 1–3 that send only
    public package names and versions (step 1 fetches published Maven metadata to resolve Gradle builds).
@@ -114,6 +115,14 @@ or later (`python`, `python3` or `py -3`). Pass the user's flags to the steps na
 
 Script messages cite a design spec's numbering (`Step 4.7`, `spec §9`, `open question 13`), not the step
 numbers here, and the spec isn't shipped with the skill: act on the message text, not the number.
+
+### 0. Delete the previous output
+
+Before scanning, always delete `<path>/dependency-audit-out/` if it exists, without asking, even when
+`--out` names another folder, so no reports or `raw/` evidence from an earlier run are left beside this
+run's results. Delete only that one folder at the project
+root; if it is a symlink or junction, remove the link, not its target. If the deletion fails, stop and
+tell the user rather than scanning with the old output in place.
 
 ### 1. Inventory
 
