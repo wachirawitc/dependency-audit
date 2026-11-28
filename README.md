@@ -40,7 +40,8 @@ Key guarantees (full list in [`dependency-audit/SKILL.md`](dependency-audit/SKIL
   triage (to check reachability) are part of its session with the model provider.
 - Advisory IDs and EOL dates come only from sources fetched during the run, never from the model's memory.
 - Private or internal package names are never sent to public services.
-- The project is never modified, built or executed, and no `osv-scanner.toml` is written.
+- The project is never built or executed, and no `osv-scanner.toml` is written. The only change
+  to the project is deleting a previous run's `dependency-audit-out/` folder at its root before scanning.
 - Registry credentials found in the project are shown only in redacted form (`npm_…(40)`).
 - Repository text that tries to steer the audit is reported as a `prompt-injection-attempt` finding.
 
