@@ -126,6 +126,14 @@ Outputs, in `--out`:
 - `raw/`: the evidence behind every finding (inventory, OSV records, scanner output, triage), and
   `raw/scan-input/`, the copy of the manifests and lockfiles the scanners read.
 
+Both reports show relative paths only, so they can be shared without exposing the machine's folder
+layout. `target.path` is the project folder relative to the report folder (`..` with the default
+`--out`; the project folder's name when the report is on another Windows drive). Absolute paths in
+scanner messages, errors and gaps are rewritten: the project folder to `target.path`, the output
+folder to `.`, `raw/` to `raw` and the home folder to `~`. `validate_report.py` rejects an absolute
+`target.path` and warns about any absolute path left in the text. Only `raw/inventory.json` keeps the
+absolute project path, which the scripts need on this machine.
+
 To re-render a report's HTML by hand (writes `dependency-report.html` next to the JSON, replacing it):
 
 ```
