@@ -9,15 +9,26 @@ description: >
   end-of-life or support-status check, SBOM-style inventory, or runs /dependency-audit.
 argument-hint: "[path] [--out <dir>] [--offline] [--severity <min>] [--no-transitive] [--fail-on <severity>] [--unmaintained-months <n>] | --setup [path] | --setup-dry [path]"
 metadata:
-  version: "1.3.0"
+  version: "1.4.0"
 ---
 
 # Dependency audit
 
 Every run writes two files that report the same findings: `dependency-report.json` for machines and
 `dependency-report.html` for people. Both have two sections: the **inventory** (libraries, frameworks
-and runtimes, each with its support status) and the **vulnerabilities** (known advisories, plus
-out-of-support items that need action).
+and runtimes, each with its support status and where it is used) and the **vulnerabilities** (known
+advisories, plus out-of-support items that need action).
+
+**Where each item is used** is part of every inventory entry, as paths relative to the project root:
+
+| Item | Fields that say where it is used |
+|---|---|
+| Library | `manifest` and `lockfile` that declare it, `workspace` (the sub-project, when not the root), `introduced_by` (the direct dependency that pulls in a transitive one) |
+| Framework | `manifest` of the project that uses it, and `evidence` (that manifest or lockfile plus up to 3 signal files such as `next.config.js`) |
+| Runtime | `evidence` (the files that pin it, such as `.nvmrc`, `Dockerfile`, `global.json`) |
+
+A library used by several projects gets one entry per manifest, and a framework one entry per
+project, so each entry names one place. The scripts fill these fields; never add or edit a path yourself.
 
 The work is split on purpose. **Scripts produce facts**: parsing, registry and advisory lookups,
 report building, validation and rendering are deterministic. **You produce judgment**: whether
@@ -246,16 +257,31 @@ Take every number from `dependency-report.json`, and list "Not covered" items fr
 (`tools_missing`, `ecosystems_unsupported`, `gaps`) and `scan.errors`. If `tools_missing` lists `osv-scanner-mcp`,
 suggest `/dependency-audit --setup`. Show credentials only in the redacted form.
 
+Say where each item is used, taking the paths from the fields in the table at the top (never from
+memory or a guess):
+
+- **Runtimes and frameworks**: one line each, with the files from its `evidence`. When the same
+  framework appears in several projects, list each project's manifest on its line.
+- **Libraries in out-of-support items and top actions**: the `lockfile`, or `manifest` when there is no
+  lockfile, so the user knows which file to change. For a transitive library, add `via` its
+  `introduced_by` chain. When the same library is in several manifests, name each one.
+- **Projects**: when libraries come from more than one `workspace`, say how many projects and name them
+  (up to 5, then "and N more").
+
 ```
 Dependency audit complete: my-app @ abc1234 (online mode)
 
-Inventory: Node.js 20 · 3 frameworks (Next.js 14.1.0, Express 4.18.2, Prisma 5.9.0) · 42 direct / 611 transitive libraries
-Out of support: 11 (Node.js 20 end-of-life since 2026-04-30, request 2.88.2 deprecated, …) · 49 unknown
+Inventory: 42 direct / 611 transitive libraries in 2 projects (services/api, web)
+  Runtime    Node.js 20 ............ .nvmrc, Dockerfile
+  Framework  Next.js 14.1.0 ........ web/package-lock.json, web/next.config.js
+  Framework  Express 4.18.2 ........ services/api/package-lock.json
+  Framework  Prisma 5.9.0 .......... services/api/package-lock.json, services/api/prisma/schema.prisma
+Out of support: 11 (Node.js 20 end-of-life since 2026-04-30 in Dockerfile, request 2.88.2 deprecated in services/api/package-lock.json, …) · 49 unknown
 Vulnerabilities: 1 critical · 3 high · 5 medium · 2 low · 4 info
 
 Top actions:
-  1. Upgrade lodash 4.17.15 → 4.17.21 (F-001, reachable)
-  2. Move the Docker base image off Node.js 20 (F-012, end-of-life)
+  1. Upgrade lodash 4.17.15 → 4.17.21 in web/package-lock.json and services/api/package-lock.json (F-001, reachable)
+  2. Move the Docker base image in Dockerfile off Node.js 20 (F-012, end-of-life)
 
 Not covered: services/legacy/build.gradle has no lockfile (transitive dependencies approximated from published metadata)
              osv-scanner MCP not configured; used the CLI fallback (run /dependency-audit --setup)

@@ -263,7 +263,7 @@ footer { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 0.8rem; color
     </div>
     <div class="cards" id="tech-cards"></div>
     <div class="controls">
-      <input type="search" id="lib-search" placeholder="Search packages" aria-label="Search packages">
+      <input type="search" id="lib-search" placeholder="Search packages or files" aria-label="Search packages or files">
       <select id="lib-show" aria-label="Which packages">
         <option value="direct">Direct dependencies</option>
         <option value="attention">Needs attention</option>
@@ -608,11 +608,15 @@ footer { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 0.8rem; color
     if (k === "vulns") return l.vulnerability_ids.length;
     return String(l[k] || "").toLowerCase();
   }
+  // Files that declare the library: its manifest, then its lockfile when that is a different file.
+  function libFiles(l) {
+    return [l.manifest, l.lockfile].filter(function (f, i, a) { return f && a.indexOf(f) === i; });
+  }
   function renderLibs() {
     var q = $("lib-search").value.trim().toLowerCase(), show = $("lib-show").value, scope = $("lib-scope").value;
     var rows = R.inventory.libraries.filter(function (l) {
       return (show === "all" || (show === "direct" && l.direct) || (show === "attention" && needsAttention(l))) &&
-             (!scope || l.scope === scope) && (!q || (l.name + " " + l.version + " " + (l.license || "")).toLowerCase().indexOf(q) > -1);
+             (!scope || l.scope === scope) && (!q || (l.name + " " + l.version + " " + (l.license || "") + " " + libFiles(l).join(" ")).toLowerCase().indexOf(q) > -1);
     }).sort(function (a, b) {
       var x = libVal(a, libSort.key), y = libVal(b, libSort.key);
       return (x < y ? -1 : x > y ? 1 : 0) * libSort.dir || a.name.localeCompare(b.name);
@@ -625,8 +629,9 @@ footer { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 0.8rem; color
     var body = $("lib-body"); body.textContent = "";
     rows.forEach(function (l) {
       var st = (l.support && l.support.status) || "unknown";
+      var files = libFiles(l);
       var sub = [cap(l.scope), l.direct ? "direct" : "transitive" + (l.introduced_by.length ? " via " + l.introduced_by.join(" → ") : ""),
-        l.workspace ? "in " + l.workspace : null, l.vendored ? "vendored file" : null, l.private ? "private" : null,
+        files.length ? "in " + files.join(", ") : (l.workspace ? "in " + l.workspace : null), l.vendored ? "vendored file" : null, l.private ? "private" : null,
         (l.found_by || []).length ? "found only by " + l.found_by.join(", ") : null].filter(Boolean).join(" · ");
       body.append(h("tr", { class: needsAttention(l) ? "attn " + (l.vulnerability_ids.length ? "sev-high" : "st-" + st) : null },
         h("td", null, h("div", { class: "mono", text: l.name }), h("div", { class: "sub", text: sub })),
