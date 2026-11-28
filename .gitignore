@@ -9,6 +9,11 @@ venv/
 # evals/ and fixtures/ stay tracked so runs can be reproduced.
 dependency-audit-workspace/iteration-*/
 
+# Fixture build output (Gradle caches, Maven target/). Fixtures track obj/ on
+# purpose (NuGet restore output the audit reads), so only these are ignored.
+dependency-audit-workspace/fixtures/**/.gradle/
+dependency-audit-workspace/fixtures/**/target/
+
 # Local audit outputs
 dependency-report.json
 dependency-report.html
