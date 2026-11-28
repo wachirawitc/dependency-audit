@@ -27,7 +27,7 @@
       "required": ["name", "path", "vcs"],
       "properties": {
         "name": { "type": "string", "minLength": 1 },
-        "path": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "minLength": 1, "pattern": "^(?![A-Za-z]:|[\\\\/])", "description": "The project folder relative to the folder the report is in, with forward slashes (for example \"..\"); never an absolute path" },
         "vcs": {
           "type": ["object", "null"],
           "additionalProperties": false,

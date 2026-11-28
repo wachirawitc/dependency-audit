@@ -9,7 +9,7 @@ description: >
   end-of-life or support-status check, SBOM-style inventory, or runs /dependency-audit.
 argument-hint: "[path] [--out <dir>] [--offline] [--severity <min>] [--no-transitive] [--fail-on <severity>] [--unmaintained-months <n>] | --setup [path] | --setup-dry [path]"
 metadata:
-  version: "1.2.1"
+  version: "1.3.0"
 ---
 
 # Dependency audit

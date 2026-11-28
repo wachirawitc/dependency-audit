@@ -136,7 +136,8 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     report = json.loads(args.json.read_text(encoding="utf-8"))
-    errors, _warnings = validate_report.validate(report, args.raw or args.json.resolve().parent / "raw")
+    errors, _warnings = validate_report.validate(report, args.raw or args.json.resolve().parent / "raw",
+                                               report_dir=args.json.resolve().parent)
     out_path = args.out or args.json.with_suffix(".html")
     page = render(report, args.template.read_text(encoding="utf-8"), args.json.name, errors)
     out_path.write_text(page, encoding="utf-8")

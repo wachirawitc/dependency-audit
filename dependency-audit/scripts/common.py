@@ -88,6 +88,56 @@ def posix(path) -> str:
     return str(path).replace("\\", "/")
 
 
+def relative_to(path, start) -> str | None:
+    """`path` relative to the folder `start`, with forward slashes; None when there is no relative
+    path between them (different Windows drives)."""
+    try:
+        return posix(os.path.relpath(Path(path).resolve(), Path(start).resolve()))
+    except ValueError:
+        return None
+
+
+# An absolute local path inside a string: a drive letter (C:\ or C:/), a UNC share, or a POSIX
+# home/temp folder. Used to keep the reports free of machine-specific paths.
+ABSOLUTE_PATH_RE = re.compile(r"(?<![\w/\\:.])(?:[A-Za-z]:[\\/]|\\\\[\w.$-]+\\|/(?:home|Users|tmp|var|root|mnt|opt|private)/)")
+
+
+def strip_local_paths(value, prefixes):
+    """Copy of `value` (JSON data) with every absolute folder in `prefixes` (a list of
+    (folder, replacement)) replaced inside its strings, matched with either slash and, on Windows,
+    in any case. Longer folders are replaced first, so a folder nested in another wins."""
+    pats = []
+    for folder, repl in prefixes:
+        forms = {posix(folder).rstrip("/")}
+        try:
+            forms.add(posix(Path(folder).resolve()).rstrip("/"))
+        except OSError:
+            pass
+        for f in forms:
+            if f:
+                pats.append((f, repl))
+    pats.sort(key=lambda p: len(p[0]), reverse=True)
+    flags = re.IGNORECASE if os.name == "nt" else 0
+    compiled = [(re.compile(re.escape(f).replace("/", r"[\\/]") + r"(?![^\\/\s\"'`),;:])", flags), repl)
+                for f, repl in pats]
+
+    def fix(s: str) -> str:
+        for rx, repl in compiled:
+            s = rx.sub(lambda _m: repl, s)
+        return s
+
+    def walk(v):
+        if isinstance(v, str):
+            return fix(v)
+        if isinstance(v, list):
+            return [walk(x) for x in v]
+        if isinstance(v, dict):
+            return {k: walk(x) for k, x in v.items()}
+        return v
+
+    return walk(value)
+
+
 def read_text(path, limit: int | None = None) -> str:
     """Read a text file leniently (UTF-8 with BOM handling, undecodable bytes replaced)."""
     data = Path(path).read_bytes()

@@ -10,7 +10,7 @@
   },
   "target": {
     "name": "orderdesk",
-    "path": "D:/gitlab/orderdesk",
+    "path": "..",
     "vcs": {
       "type": "git",
       "commit": "9f3c2a1",

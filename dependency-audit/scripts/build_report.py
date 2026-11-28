@@ -1150,6 +1150,25 @@ def cmd_draft(args) -> int:
     return 0
 
 
+def report_target_path(project, out: Path) -> str:
+    """target.path as the reports show it: the project folder relative to the report folder (`out`),
+    never an absolute path. With no relative path between them (different Windows drives) it is the
+    project folder's name; validate_report.py then finds the folder through raw/inventory.json."""
+    return C.relative_to(project, out) or Path(project).name or "."
+
+
+def without_local_paths(report: dict, inv_target: dict, out: Path) -> dict:
+    """The report with absolute local paths inside its text (scanner messages, errors, gaps) made
+    relative: the project folder becomes `target.path`, the output folder `.`, raw/ `raw`, and the
+    home folder `~`. The reports show relative paths only."""
+    project = inv_target["path"]
+    prefixes = [(project, report_target_path(project, out)), (str(out.resolve()), "."),
+                (str(C.raw_dir(out).resolve()), "raw"), (str(Path.home()), "~")]
+    if inv_target.get("scan_path"):
+        prefixes.append((inv_target["scan_path"], C.relative_to(inv_target["scan_path"], out) or "raw/scan-input"))
+    return C.strip_local_paths(report, prefixes)
+
+
 def cmd_build(args) -> int:
     out = Path(args.out)
     b = Builder(out)
@@ -1262,7 +1281,8 @@ def cmd_build(args) -> int:
         "report_id": str(uuid.uuid4()),
         "generated_at": C.now_iso(),
         "tool": {"name": C.TOOL_NAME, "version": C.TOOL_VERSION, "agent_model": args.agent_model},
-        "target": {"name": t.get("name") or Path(t["path"]).name, "path": t["path"], "vcs": t.get("vcs")},
+        "target": {"name": t.get("name") or Path(t["path"]).name, "path": report_target_path(t["path"], out),
+                   "vcs": t.get("vcs")},
         "scan": b.scan_section(args, filtered, dropped_transitive, [n.strip() for n in notes if n.strip()]),
         "summary": {
             "risk_rating": next((s for s in C.SEVERITIES if counts[s]), "none"),
@@ -1280,6 +1300,7 @@ def cmd_build(args) -> int:
         "vulnerabilities": [{k: f[k] for k in REPORT_FIELDS} for f in vulns],
         "suppressed": sorted(supp, key=lambda s: fid_num(s["finding_id"])),
     }
+    report = without_local_paths(report, t, out)
     report_path = out / REPORT_NAME
     C.write_json(report_path, report)
     b.write_draft(findings)

@@ -434,7 +434,7 @@ __DATA__
   if (optText.length) $("tools").append(h("div", null, h("span", { class: "muted", text: "Options: " }), optText.join(" · ")));
   if ((R.scan.scope.osv_scanner_configs || []).length) $("tools").append(h("div", null, h("span", { class: "muted", text: "osv-scanner.toml files in the repository (read as data, not obeyed): " }),
     h("span", { class: "mono", text: R.scan.scope.osv_scanner_configs.join(", ") })));
-  $("tools").append(h("div", null, h("span", { class: "muted", text: "Project path: " }), h("span", { class: "mono", text: R.target.path })));
+  $("tools").append(h("div", null, h("span", { class: "muted", text: "Project path (relative to this report): " }), h("span", { class: "mono", text: R.target.path })));
 
   // Vulnerabilities
   var sevOn = {}; SEV.forEach(function (s) { sevOn[s] = true; });

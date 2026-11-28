@@ -31,6 +31,8 @@ RULE_CATEGORY = {"osv": "dependency", "scanner-advisory": "dependency", "support
                  "prompt-injection-attempt": "integrity"}
 SUPPORT_RULE = {"end-of-life": "support-eol", "deprecated": "support-deprecated", "unmaintained": "support-unmaintained"}
 FINDING_SCOPES = {"runtime", "optional"}
+# An absolute local path inside a string (same pattern as common.ABSOLUTE_PATH_RE).
+ABSOLUTE_PATH_RE = re.compile(r"(?<![\w/\\:.])(?:[A-Za-z]:[\\/]|\\\\[\w.$-]+\\|/(?:home|Users|tmp|var|root|mnt|opt|private)/)")
 
 for _stream in (sys.stdout, sys.stderr):
     try:
@@ -188,7 +190,38 @@ def load_scanner_ids(raw: Path) -> dict[str, set[str]] | None:
     return out
 
 
-def cross_errors(r: dict, raw: Path | None) -> tuple[list[str], list[str]]:
+def is_absolute_path(s: str) -> bool:
+    return bool(re.match(r"^(?:[A-Za-z]:|[\\/])", s))
+
+
+def all_strings(v):
+    if isinstance(v, str):
+        yield v
+    elif isinstance(v, list):
+        for x in v:
+            yield from all_strings(x)
+    elif isinstance(v, dict):
+        for x in v.values():
+            yield from all_strings(x)
+
+
+def resolve_target(path: str, report_dir: Path | None, raw: Path | None) -> Path | None:
+    """The project folder: target.path relative to the report folder, else (reports on another
+    drive than the project) the absolute path recorded in raw/inventory.json."""
+    if report_dir is not None and not is_absolute_path(path) and (report_dir / path).is_dir():
+        return report_dir / path
+    inv = raw / "inventory.json" if raw is not None else None
+    if inv is not None and inv.is_file():
+        try:
+            p = Path(json.loads(inv.read_text(encoding="utf-8"))["target"]["path"])
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
+        if p.is_dir():
+            return p
+    return None
+
+
+def cross_errors(r: dict, raw: Path | None, report_dir: Path | None = None) -> tuple[list[str], list[str]]:
     errs, warns = [], []
     inv, vulns, supp = r["inventory"], r["vulnerabilities"], r["suppressed"]
     libs, rts, fws = inv["libraries"], inv["runtimes"], inv["frameworks"]
@@ -385,11 +418,18 @@ def cross_errors(r: dict, raw: Path | None) -> tuple[list[str], list[str]]:
             if bad:
                 errs.append("%s: %s not found in raw/scanner-results.json for %s (hard rule 2)" % (f["id"], ", ".join(bad), f["advisory"]["source"]))
 
+    # the reports show relative paths only
+    if is_absolute_path(r["target"]["path"]):
+        errs.append("target.path %s is absolute; it must be relative to the report folder" % r["target"]["path"])
+    leaks = sorted({s for s in all_strings(r) if ABSOLUTE_PATH_RE.search(s)})
+    for s in leaks[:5]:
+        warns.append("absolute local path in the report text: %s" % (s if len(s) <= 120 else s[:117] + "..."))
+
     # evidence files exist under the target (hard rule 3)
-    target = Path(r["target"]["path"])
+    target = resolve_target(r["target"]["path"], report_dir, raw)
     if not sample:
-        if not target.is_dir():
-            errs.append("target.path %s is not a folder on this machine" % r["target"]["path"])
+        if target is None:
+            errs.append("target.path %s is not a folder on this machine (relative to the report folder)" % r["target"]["path"])
         else:
             for f in vulns:
                 p = Path(f["location"]["file"])
@@ -398,14 +438,16 @@ def cross_errors(r: dict, raw: Path | None) -> tuple[list[str], list[str]]:
     return errs, warns
 
 
-def validate(report, raw: Path | None = None, schema: dict | None = None) -> tuple[list[str], list[str]]:
-    """(errors, warnings). Errors make the report invalid."""
+def validate(report, raw: Path | None = None, schema: dict | None = None,
+             report_dir: Path | None = None) -> tuple[list[str], list[str]]:
+    """(errors, warnings). Errors make the report invalid. `report_dir` is the folder the report
+    is in (target.path is relative to it); it defaults to the folder that holds `raw`."""
     schema = schema or json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
     errs = schema_errors(report, schema)
     if errs:
         return errs, []  # cross-checks assume the shape is right
     errs = credential_problems(report)
-    more, warns = cross_errors(report, raw)
+    more, warns = cross_errors(report, raw, report_dir or (raw.parent if raw is not None else None))
     return errs + more, warns
 
 
@@ -422,7 +464,7 @@ def main(argv=None) -> int:
         print("invalid: %s can't be read as JSON (%s)" % (args.report, e))
         return 1
     raw = args.raw or args.report.resolve().parent / "raw"
-    errs, warns = validate(report, raw)
+    errs, warns = validate(report, raw, report_dir=args.report.resolve().parent)
     at_or_above = []
     if args.fail_on and not errs:
         limit = SEV_RANK[args.fail_on]
